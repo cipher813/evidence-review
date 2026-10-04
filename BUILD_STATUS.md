@@ -19,3 +19,5 @@ Verification: 24 tests passed on Python 3.12/macOS; whole-package Python coverag
 Final wheel built twice with identical SHA-256: 4bb2735471cbb1bd605703df1ac33b6960ce0737a406e7dc863a9b5cc5201987. Clean noneditable wheel install and CLI help verified.
 
 Fresh whole-branch review findings closed with regression tests: on-input text saving; explicit negative boolean decisions versus truth-required acknowledgement; count/date classification; metadata and tolerance display. All public fixtures remain artificial.
+
+Ruling: local coverage gate and PR/issue templates complete repository delivery. Hosted CI is deferred to an external-contributor need, preserving the owner's minimal Actions preference; local evidence is not described as CI green.
