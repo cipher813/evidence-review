@@ -1,0 +1,511 @@
+{
+  "$defs": {
+    "Calculation": {
+      "additionalProperties": false,
+      "properties": {
+        "formula": {
+          "title": "Formula",
+          "type": "string"
+        },
+        "operands": {
+          "items": {
+            "$ref": "#/$defs/Operand"
+          },
+          "title": "Operands",
+          "type": "array"
+        },
+        "result": {
+          "title": "Result",
+          "type": "string"
+        },
+        "unit": {
+          "default": "",
+          "title": "Unit",
+          "type": "string"
+        },
+        "tolerance": {
+          "default": "0",
+          "title": "Tolerance",
+          "type": "string"
+        },
+        "conversions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Conversions",
+          "type": "array"
+        },
+        "recomputation": {
+          "additionalProperties": true,
+          "title": "Recomputation",
+          "type": "object"
+        }
+      },
+      "required": [
+        "formula",
+        "operands",
+        "result"
+      ],
+      "title": "Calculation",
+      "type": "object"
+    },
+    "Citation": {
+      "additionalProperties": false,
+      "properties": {
+        "source_id": {
+          "title": "Source Id",
+          "type": "string"
+        },
+        "start_line": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start Line"
+        },
+        "end_line": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End Line"
+        },
+        "excerpt": {
+          "default": "",
+          "title": "Excerpt",
+          "type": "string"
+        },
+        "status": {
+          "default": "unavailable",
+          "enum": [
+            "located",
+            "unavailable",
+            "invalid_locator",
+            "excerpt_mismatch"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "reason": {
+          "default": "",
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_id"
+      ],
+      "title": "Citation",
+      "type": "object"
+    },
+    "Claim": {
+      "additionalProperties": false,
+      "properties": {
+        "claim_id": {
+          "title": "Claim Id",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "citations": {
+          "items": {
+            "$ref": "#/$defs/Citation"
+          },
+          "title": "Citations",
+          "type": "array"
+        },
+        "calculation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Calculation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "claim_id",
+        "text"
+      ],
+      "title": "Claim",
+      "type": "object"
+    },
+    "FormField": {
+      "additionalProperties": false,
+      "properties": {
+        "field_id": {
+          "title": "Field Id",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "kind": {
+          "default": "choice",
+          "enum": [
+            "choice",
+            "text",
+            "boolean"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "options": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Options",
+          "type": "array"
+        },
+        "required": {
+          "default": true,
+          "title": "Required",
+          "type": "boolean"
+        },
+        "subject_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Subject Id"
+        },
+        "evidence_required": {
+          "default": false,
+          "title": "Evidence Required",
+          "type": "boolean"
+        },
+        "note_required_unless": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Note Required Unless",
+          "type": "array"
+        }
+      },
+      "required": [
+        "field_id",
+        "label"
+      ],
+      "title": "FormField",
+      "type": "object"
+    },
+    "NumericSpan": {
+      "additionalProperties": false,
+      "properties": {
+        "span_id": {
+          "title": "Span Id",
+          "type": "string"
+        },
+        "field_path": {
+          "title": "Field Path",
+          "type": "string"
+        },
+        "start": {
+          "minimum": 0,
+          "title": "Start",
+          "type": "integer"
+        },
+        "end": {
+          "exclusiveMinimum": 0,
+          "title": "End",
+          "type": "integer"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "state": {
+          "default": "uncited",
+          "enum": [
+            "cited",
+            "derived",
+            "uncited",
+            "ambiguous",
+            "unavailable",
+            "identifier"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "claim_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Claim Ids",
+          "type": "array"
+        },
+        "reason": {
+          "default": "",
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "span_id",
+        "field_path",
+        "start",
+        "end",
+        "text"
+      ],
+      "title": "NumericSpan",
+      "type": "object"
+    },
+    "Operand": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "string"
+        },
+        "unit": {
+          "default": "",
+          "title": "Unit",
+          "type": "string"
+        },
+        "period": {
+          "default": "",
+          "title": "Period",
+          "type": "string"
+        },
+        "citation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Citation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ],
+      "title": "Operand",
+      "type": "object"
+    },
+    "ReferenceItem": {
+      "additionalProperties": false,
+      "properties": {
+        "reference_id": {
+          "title": "Reference Id",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "citations": {
+          "items": {
+            "$ref": "#/$defs/Citation"
+          },
+          "title": "Citations",
+          "type": "array"
+        },
+        "calculation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Calculation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "reference_id",
+        "text"
+      ],
+      "title": "ReferenceItem",
+      "type": "object"
+    },
+    "ReportField": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "claim_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Claim Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "path",
+        "label",
+        "text"
+      ],
+      "title": "ReportField",
+      "type": "object"
+    },
+    "Source": {
+      "additionalProperties": false,
+      "properties": {
+        "source_id": {
+          "title": "Source Id",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        },
+        "metadata": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Metadata",
+          "type": "object"
+        }
+      },
+      "required": [
+        "source_id",
+        "title",
+        "text",
+        "sha256"
+      ],
+      "title": "Source",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "review-bundle/v1",
+      "default": "review-bundle/v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "bundle_id": {
+      "pattern": "^[A-Za-z0-9_.:-]{1,120}$",
+      "title": "Bundle Id",
+      "type": "string"
+    },
+    "task_kind": {
+      "default": "independent",
+      "enum": [
+        "independent",
+        "adjudication",
+        "reference",
+        "finding"
+      ],
+      "title": "Task Kind",
+      "type": "string"
+    },
+    "document_hashes": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Document Hashes",
+      "type": "object"
+    },
+    "fields": {
+      "items": {
+        "$ref": "#/$defs/ReportField"
+      },
+      "title": "Fields",
+      "type": "array"
+    },
+    "sources": {
+      "items": {
+        "$ref": "#/$defs/Source"
+      },
+      "title": "Sources",
+      "type": "array"
+    },
+    "spans": {
+      "items": {
+        "$ref": "#/$defs/NumericSpan"
+      },
+      "title": "Spans",
+      "type": "array"
+    },
+    "claims": {
+      "items": {
+        "$ref": "#/$defs/Claim"
+      },
+      "title": "Claims",
+      "type": "array"
+    },
+    "references": {
+      "items": {
+        "$ref": "#/$defs/ReferenceItem"
+      },
+      "title": "References",
+      "type": "array"
+    },
+    "form": {
+      "items": {
+        "$ref": "#/$defs/FormField"
+      },
+      "title": "Form",
+      "type": "array"
+    },
+    "disclosures": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Disclosures",
+      "type": "object"
+    }
+  },
+  "required": [
+    "bundle_id",
+    "document_hashes",
+    "fields",
+    "sources",
+    "spans",
+    "claims",
+    "form"
+  ],
+  "title": "ReviewBundle",
+  "type": "object"
+}

@@ -1,0 +1,239 @@
+{
+  "$defs": {
+    "Defect": {
+      "additionalProperties": false,
+      "properties": {
+        "defect_id": {
+          "title": "Defect Id",
+          "type": "string"
+        },
+        "category": {
+          "title": "Category",
+          "type": "string"
+        },
+        "material": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Material"
+        },
+        "claim_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Claim Ids",
+          "type": "array"
+        },
+        "reference_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reference Ids",
+          "type": "array"
+        },
+        "evidence_note": {
+          "default": "",
+          "title": "Evidence Note",
+          "type": "string"
+        },
+        "selections": {
+          "items": {
+            "$ref": "#/$defs/Selection"
+          },
+          "title": "Selections",
+          "type": "array"
+        }
+      },
+      "required": [
+        "defect_id",
+        "category",
+        "material"
+      ],
+      "title": "Defect",
+      "type": "object"
+    },
+    "Judgment": {
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "boolean"
+            }
+          ],
+          "title": "Value"
+        },
+        "note": {
+          "default": "",
+          "title": "Note",
+          "type": "string"
+        },
+        "claim_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Claim Ids",
+          "type": "array"
+        },
+        "selections": {
+          "items": {
+            "$ref": "#/$defs/Selection"
+          },
+          "title": "Selections",
+          "type": "array"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "title": "Judgment",
+      "type": "object"
+    },
+    "Selection": {
+      "additionalProperties": false,
+      "properties": {
+        "source_id": {
+          "title": "Source Id",
+          "type": "string"
+        },
+        "source_hash": {
+          "title": "Source Hash",
+          "type": "string"
+        },
+        "start_line": {
+          "title": "Start Line",
+          "type": "integer"
+        },
+        "end_line": {
+          "title": "End Line",
+          "type": "integer"
+        },
+        "excerpt": {
+          "title": "Excerpt",
+          "type": "string"
+        },
+        "subject_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Subject Id"
+        }
+      },
+      "required": [
+        "source_id",
+        "source_hash",
+        "start_line",
+        "end_line",
+        "excerpt"
+      ],
+      "title": "Selection",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "review-submission/v1",
+      "default": "review-submission/v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "bundle_id": {
+      "title": "Bundle Id",
+      "type": "string"
+    },
+    "bundle_hash": {
+      "title": "Bundle Hash",
+      "type": "string"
+    },
+    "revision": {
+      "minimum": 1,
+      "title": "Revision",
+      "type": "integer"
+    },
+    "assessor": {
+      "minLength": 1,
+      "title": "Assessor",
+      "type": "string"
+    },
+    "started_at": {
+      "title": "Started At",
+      "type": "string"
+    },
+    "submitted_at": {
+      "title": "Submitted At",
+      "type": "string"
+    },
+    "active_seconds": {
+      "minimum": 0,
+      "title": "Active Seconds",
+      "type": "number"
+    },
+    "session_seconds": {
+      "minimum": 0,
+      "title": "Session Seconds",
+      "type": "number"
+    },
+    "judgments": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Judgment"
+      },
+      "title": "Judgments",
+      "type": "object"
+    },
+    "defects": {
+      "items": {
+        "$ref": "#/$defs/Defect"
+      },
+      "title": "Defects",
+      "type": "array"
+    },
+    "complete": {
+      "const": true,
+      "title": "Complete",
+      "type": "boolean"
+    },
+    "amendment_reason": {
+      "default": "",
+      "title": "Amendment Reason",
+      "type": "string"
+    },
+    "provenance": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Provenance",
+      "type": "object"
+    }
+  },
+  "required": [
+    "bundle_id",
+    "bundle_hash",
+    "revision",
+    "assessor",
+    "started_at",
+    "submitted_at",
+    "active_seconds",
+    "session_seconds",
+    "judgments",
+    "defects",
+    "complete",
+    "provenance"
+  ],
+  "title": "ReviewSubmission",
+  "type": "object"
+}
