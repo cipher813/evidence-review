@@ -107,3 +107,38 @@ def test_missing_required_answer_can_be_corrected_without_reload(tmp_path):
         page.get_by_role("button", name="Submit review", exact=True).click()
         expect(page.get_by_role("status")).to_contain_text("continuation succeeded")
         browser.close()
+
+
+def test_typing_without_blur_saves_notes_and_text_fields(tmp_path):
+    from evidence_review.contracts import FormField
+
+    b = example_bundle()
+    b.form.append(
+        FormField(field_id="reason", label="Review reason", kind="text", required=False)
+    )
+    with (
+        open_review(b, FileStore(tmp_path), launch=False) as h,
+        sync_playwright() as pw,
+    ):
+        browser = pw.chromium.launch()
+        page = browser.new_page()
+        page.goto(h.url)
+        expect(page.get_by_role("status")).to_contain_text("Saved locally")
+        page.get_by_label("Assessor", exact=True).fill("Synthetic")
+        page.get_by_label("Review reason", exact=True).fill("Unblurred decision")
+        expect(page.get_by_role("status")).to_contain_text("revision 1")
+        page.reload()
+        expect(page.get_by_label("Review reason", exact=True)).to_have_value(
+            "Unblurred decision"
+        )
+        page.get_by_label(
+            "Explanation: Does the evidence support the margin claim?", exact=True
+        ).fill("Unblurred explanation")
+        expect(page.get_by_role("status")).to_contain_text("revision 2")
+        page.reload()
+        expect(
+            page.get_by_label(
+                "Explanation: Does the evidence support the margin claim?", exact=True
+            )
+        ).to_have_value("Unblurred explanation")
+        browser.close()

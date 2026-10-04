@@ -24,8 +24,11 @@ def test_browser_review_reload_amend_and_safe_text(tmp_path):
             "current-prior"
         )
         expect(page.get_by_role("region", name="Evidence")).to_contain_text("22.8")
+        expect(page.get_by_role("region", name="Evidence")).to_contain_text("Absolute tolerance:")
         page.get_by_role("button", name="Open full frozen source").first.click()
         expect(page.get_by_role("region", name="Evidence")).to_contain_text("Footnote")
+        expect(page.get_by_role("region", name="Evidence")).to_contain_text("2025–2026")
+        expect(page.get_by_role("region", name="Evidence")).to_contain_text("document_type")
         page.get_by_role("button", name="L4: | 2025 | 22.8% |", exact=True).click()
         page.get_by_role("button", name="L4: | 2025 | 22.8% |", exact=True).click()
         page.get_by_label(

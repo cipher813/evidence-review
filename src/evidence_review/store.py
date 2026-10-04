@@ -98,7 +98,7 @@ def validate_answers(bundle, answers, complete=False):
             if (
                 j is None
                 or j.value == ""
-                or (field.kind == "boolean" and j.value is not True)
+                or (field.require_true and j.value is not True)
                 or (field.kind == "text" and not str(j.value).strip())
             ):
                 raise ValueError(f"required field: {field.field_id}")

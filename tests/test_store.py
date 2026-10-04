@@ -115,3 +115,21 @@ def test_invalid_verdict_and_forged_source_selection(tmp_path):
     ]
     with pytest.raises(ValueError, match="selection"):
         s.save_snapshot(b, 0, "bad2", a, "Ada", 1)
+
+
+def test_required_boolean_no_is_valid_but_completion_must_be_true(tmp_path):
+    from evidence_review.contracts import FormField
+
+    b = example_bundle()
+    b.form.append(
+        FormField(field_id="is_accurate", label="Is it accurate?", kind="boolean")
+    )
+    s = FileStore(tmp_path)
+    s.register(b)
+    a = answer()
+    a["judgments"]["is_accurate"] = {"value": False}
+    s.save_submission(b, 0, "no", a, "Ada")
+    assert s.export_submission(b.bundle_id, 1).judgments["is_accurate"].value is False
+    a["judgments"]["report_complete"]["value"] = False
+    with pytest.raises(ValueError, match="required"):
+        s.save_submission(b, 1, "incomplete", a, "Ada", 0, "revise")

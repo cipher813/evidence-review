@@ -19,6 +19,7 @@ def example_bundle():
     source = Source(
         source_id="demo-source",
         title="Synthetic margin table",
+        metadata={"period": "2025–2026", "document_type": "synthetic"},
         text=text,
         sha256=digest(text),
     )
@@ -103,6 +104,7 @@ def example_bundle():
                 field_id="report_complete",
                 label="I reviewed the full report and recorded all identified material defects.",
                 kind="boolean",
+                require_true=True,
             ),
         ],
     )

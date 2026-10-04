@@ -70,3 +70,10 @@ def test_second_consumer_shape_and_unknown_claim_link():
     b["spans"][0]["claim_ids"] = ["missing"]
     with pytest.raises(ValueError, match="unknown claim"):
         validate_bundle(b)
+
+
+def test_year_sized_economic_counts_are_not_identifiers():
+    spans = numeric_spans(
+        "claim", "The factory shipped 2026 units, versus 2025 units previously."
+    )
+    assert all(s.state != "identifier" for s in spans)

@@ -59,3 +59,5 @@ uv build
 ```
 
 Tests exercise actual Chromium, two consumer bundle shapes, source/hash/locator checks, write-ahead replay, optimistic revisions, stale tabs, hook failure and loopback authorization. Schemas ship in the wheel. This release is a small local review tool, not a multi-user hosted platform. Numeric extraction is deterministic, not a semantic evidence linker: missing/ambiguous associations stay visible. Source-table header discovery is heuristic; full text and footnotes remain available. Human judgments remain human; neither arithmetic nor matching excerpts establish support. Administrative workflow tests are not a measured human usability study.
+
+Required boolean fields accept explicit Yes or No; completion acknowledgements declare require_true. Source metadata and calculation tolerances remain visible. Every text input saves on input and displays Saving until acknowledgement. Unacknowledged edits are never claimed durable.

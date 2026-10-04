@@ -133,6 +133,9 @@ function showSource(source, start = 1, end = start) {
   const box = $("evidence");
   const title = el("h3", source.title);
   box.append(title);
+  box.append(
+    el("p", "Source metadata: " + JSON.stringify(source.metadata || {})),
+  );
   box.append(el("small", "Frozen SHA-256: " + source.sha256));
   const lines = source.text.split("\n");
   const wrap = el("div");
@@ -201,6 +204,7 @@ function showSubject(item, id) {
     const c = item.calculation;
     $("evidence").append(
       el("p", `Formula: ${c.formula} = ${c.result} ${c.unit}`),
+      el("p", `Absolute tolerance: ${c.tolerance} ${c.unit}`),
     );
     c.operands.forEach((o) => {
       $("evidence").append(
@@ -285,7 +289,16 @@ function renderForms() {
     const div = el("div");
     div.className = "field";
     let control;
-    if (f.kind === "choice") {
+    if (f.kind === "boolean" && !f.require_true) {
+      control = el("select");
+      control.append(
+        new Option("Choose…", ""),
+        new Option("Yes", "true"),
+        new Option("No", "false"),
+      );
+      const value = answers.judgments[f.field_id]?.value;
+      control.value = typeof value === "boolean" ? String(value) : "";
+    } else if (f.kind === "choice") {
       control = el("select");
       control.append(new Option("Choose…", ""));
       f.options.forEach((v) => control.append(new Option(v, v)));
@@ -302,8 +315,15 @@ function renderForms() {
     control.setAttribute("aria-label", f.label);
     label.append(control);
     div.append(label);
-    control.onchange = () => {
-      const value = f.kind === "boolean" ? control.checked : control.value;
+    control[f.kind === "text" ? "oninput" : "onchange"] = () => {
+      const value =
+        f.kind === "boolean"
+          ? f.require_true
+            ? control.checked
+            : control.value === ""
+              ? ""
+              : control.value === "true"
+          : control.value;
       if (value === "") delete answers.judgments[f.field_id];
       else judgment(f.field_id).value = value;
       save();
@@ -313,7 +333,7 @@ function renderForms() {
     note.placeholder =
       "Explanation (required for uncertainty/defects where specified)";
     note.value = answers.judgments[f.field_id]?.note || "";
-    note.onchange = () => {
+    note.oninput = () => {
       judgment(f.field_id).note = note.value;
       save();
     };
@@ -373,7 +393,7 @@ function renderDefects() {
     const category = el("input");
     category.setAttribute("aria-label", "Defect category");
     category.value = d.category;
-    category.onchange = () => {
+    category.oninput = () => {
       d.category = category.value;
       save();
     };
@@ -394,7 +414,7 @@ function renderDefects() {
     const note = el("textarea");
     note.setAttribute("aria-label", "Defect evidence explanation");
     note.value = d.evidence_note;
-    note.onchange = () => {
+    note.oninput = () => {
       d.evidence_note = note.value;
       save();
     };
@@ -478,7 +498,7 @@ async function load() {
   queue = Promise.resolve();
   render();
 }
-$("assessor").onchange = () =>
+$("assessor").oninput = () =>
   sessionStorage.setItem("assessor", $("assessor").value.trim());
 $("add-defect").onclick = () => {
   answers.defects.push({

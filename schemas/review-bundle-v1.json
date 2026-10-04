@@ -178,6 +178,11 @@
           "title": "Required",
           "type": "boolean"
         },
+        "require_true": {
+          "default": false,
+          "title": "Require True",
+          "type": "boolean"
+        },
         "subject_id": {
           "anyOf": [
             {

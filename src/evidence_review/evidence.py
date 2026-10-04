@@ -15,8 +15,9 @@ def numeric_spans(path, text):
     out = []
     for m in NUMBER.finditer(text):
         prefix = text[max(0, m.start() - 3) : m.start()]
-        identifier = bool(prefix and prefix[-1].isalpha()) or bool(
-            re.fullmatch(r"(?:19|20)\d{2}", m.group())
+        # Magnitude alone cannot distinguish years from economic counts.
+        identifier = bool(prefix and prefix[-1].isalpha()) or path.endswith(
+            (".cutoff", ".period")
         )
         out.append(
             NumericSpan(

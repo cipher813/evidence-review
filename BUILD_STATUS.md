@@ -14,6 +14,8 @@ Plan: IMPLEMENTATION_PLAN.md. Baseline: documentation only, main 9a798cd.
 Ruling: generic form fields carry caller-required decisions; no inference of semantic truth.
 Ruling: no hosted service or registry upload; exact tested commit/wheel is the consumer pin.
 
-Verification: 21 tests passed on Python 3.12/macOS; whole-package Python coverage 87%. Clean wheel import/schema/UI/license checks passed. No workflow or model calls. Browser timings are automated tests, not measured human effort.
+Verification: 24 tests passed on Python 3.12/macOS; whole-package Python coverage 87%. Clean wheel import/schema/UI/license checks passed. No workflow or model calls. Browser timings are automated tests, not measured human effort.
 
-Final wheel built twice with identical SHA-256: 549782cb3e1d96e4aca49a446cd80e8c45d0c84d11b5ed689700c33aa51371dc. Clean noneditable wheel install and CLI help verified.
+Final wheel built twice with identical SHA-256: 4bb2735471cbb1bd605703df1ac33b6960ce0737a406e7dc863a9b5cc5201987. Clean noneditable wheel install and CLI help verified.
+
+Fresh whole-branch review findings closed with regression tests: on-input text saving; explicit negative boolean decisions versus truth-required acknowledgement; count/date classification; metadata and tolerance display. All public fixtures remain artificial.

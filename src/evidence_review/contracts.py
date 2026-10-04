@@ -127,6 +127,7 @@ class FormField(Strict):
     kind: Literal["choice", "text", "boolean"] = "choice"
     options: list[str] = Field(default_factory=list)
     required: bool = True
+    require_true: bool = False
     subject_id: str | None = None
     evidence_required: bool = False
     note_required_unless: list[str] = Field(default_factory=list)
