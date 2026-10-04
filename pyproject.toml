@@ -1,0 +1,20 @@
+[project]
+name = "evidence-review"
+version = "0.1.0"
+description = "Local evidence-linked human review with durable revisions"
+requires-python = ">=3.12,<3.13"
+license = "MIT"
+license-files = ["LICENSE"]
+dependencies = ["pydantic==2.13.5"]
+[project.scripts]
+evidence-review = "evidence_review.cli:main"
+[dependency-groups]
+dev = ["pytest==9.1.1", "pytest-cov==7.0.0", "playwright==1.58.0"]
+[build-system]
+requires = ["hatchling==1.29.0"]
+build-backend = "hatchling.build"
+[tool.hatch.build.targets.wheel]
+packages = ["src/evidence_review"]
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

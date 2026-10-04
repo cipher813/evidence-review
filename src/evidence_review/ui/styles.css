@@ -1,0 +1,113 @@
+:root {
+  font-family: system-ui, sans-serif;
+  color: #172534;
+  background: #f5f7fa;
+}
+body {
+  margin: 0;
+}
+header {
+  padding: 1rem 2rem;
+  border-bottom: 1px solid #ccd7e0;
+  background: white;
+}
+h1 {
+  margin: 0;
+  font-size: 1.4rem;
+}
+main {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 1rem;
+  padding: 1rem;
+}
+section {
+  min-width: 0;
+  background: white;
+  padding: 1rem;
+  border: 1px solid #d3dde5;
+  border-radius: 8px;
+  max-height: 78vh;
+  overflow: auto;
+}
+label {
+  display: block;
+  margin: 0.5rem 0;
+}
+input,
+select,
+textarea,
+button {
+  font: inherit;
+  max-width: 100%;
+  padding: 0.45rem;
+  border: 1px solid #879bad;
+  border-radius: 4px;
+}
+textarea {
+  width: 95%;
+  min-height: 3rem;
+}
+button {
+  background: #e9f1fa;
+  color: #12395c;
+  cursor: pointer;
+  margin: 0.2rem;
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+.number {
+  padding: 0 0.1rem;
+  background: #fff0bc;
+  border-bottom: 2px solid #a76f00;
+}
+.unresolved {
+  background: #ffe5e2;
+}
+pre,
+.report-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: inherit;
+  line-height: 1.5;
+}
+.source-line {
+  display: block;
+  text-align: left;
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  font-family: ui-monospace, monospace;
+  white-space: pre-wrap;
+}
+.selected {
+  background: #d9edff;
+}
+.field,
+.defect {
+  border-top: 1px solid #d3dde5;
+  padding: 0.6rem 0;
+}
+.save-error {
+  color: #a31a1a;
+}
+button:focus,
+input:focus,
+textarea:focus,
+select:focus {
+  outline: 3px solid #527fff;
+}
+small {
+  display: block;
+  color: #4c5e6b;
+}
+@media (max-width: 1000px) {
+  main {
+    grid-template-columns: 1fr;
+  }
+  section {
+    max-height: none;
+  }
+}

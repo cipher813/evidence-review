@@ -11,3 +11,6 @@ review-data/
 artifacts/
 AGENTS.md
 CLAUDE.md
+.coverage
+htmlcov/
+.evidence-review-demo/

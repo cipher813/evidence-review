@@ -1,6 +1,6 @@
 # Evidence Review design
 
-Status: approved direction; implementation not yet built. Local-first reusable Python package and browser app.
+Status: approved direction; implementation under review. Local-first reusable Python package and browser app.
 
 ## Purpose
 An outside user can inspect a report against provided evidence and record human judgments without copying identifiers, locating source files or editing JSON. The application automates evidence assembly, navigation, metadata, autosave, revisions and export. It does not determine factual truth on behalf of the human.
