@@ -15,7 +15,7 @@ Local verification: 20 tests passed, including actual Chromium. Whole Python pac
 Maintained by @cipher813. Open an issue for design/bug feedback; see [SECURITY.md](SECURITY.md) for sensitive reports. Do not attach private documents or credentials.
 
 ## License
-MIT; see [LICENSE](LICENSE). No distributable release has been published.
+MIT; see [LICENSE](LICENSE). The initial package is distributed through its exact reviewed Git commit; no registry release is implied.
 
 ## Local use
 Requires Python 3.12. Install the tested commit (replace `<commit>` with the reviewed full SHA):
