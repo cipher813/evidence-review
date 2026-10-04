@@ -15,4 +15,4 @@ No product tests or coverage claims yet. Implementation acceptance includes cont
 Maintained by @cipher813. Open an issue for design/bug feedback; see [SECURITY.md](SECURITY.md) for sensitive reports. Do not attach private documents or credentials.
 
 ## License
-License selection is pending owner confirmation. No open-source license is granted by public visibility alone; no distributable release has been published.
+MIT; see [LICENSE](LICENSE). No distributable release has been published.
