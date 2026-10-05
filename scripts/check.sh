@@ -1,6 +1,7 @@
 #!/bin/sh
 set -eu
-uv lock --check --offline
+# Lock consistency must not depend on a warm resolver cache.
+uv lock --check
 uv run --frozen coverage erase
 uv run --frozen coverage run -m pytest
 uv run --frozen coverage run --append scripts/verify_distribution.py

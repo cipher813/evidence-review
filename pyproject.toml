@@ -1,6 +1,6 @@
 [project]
 name = "evidence-review"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local evidence-linked human review with durable revisions"
 requires-python = ">=3.12,<3.13"
 license = "MIT"
@@ -9,7 +9,7 @@ dependencies = ["pydantic==2.13.5"]
 [project.scripts]
 evidence-review = "evidence_review.cli:main"
 [dependency-groups]
-dev = ["pytest==9.1.1", "pytest-cov==7.1.0", "playwright==1.63.0"]
+dev = ["pytest==9.1.1", "pytest-cov==7.1.0", "playwright==1.63.0", "packaging==26.3"]
 [build-system]
 requires = ["hatchling==1.29.0"]
 build-backend = "hatchling.build"
@@ -25,6 +25,6 @@ source = ["src/evidence_review", "scripts"]
 relative_files = true
 
 [tool.coverage.report]
-fail_under = 90.67
+fail_under = 92.0
 show_missing = true
 precision = 2

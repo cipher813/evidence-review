@@ -8,9 +8,18 @@ import webbrowser
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
-from .contracts import validate_bundle
+from .contracts import blind_terms, blind_violations, validate_bundle
+from .evidence import evidence_views, inventory
 from .store import Conflict
 from .hooks import Hooks, run_hook
+
+EVENT_KINDS = {
+    "span_opened",
+    "subject_opened",
+    "source_opened",
+    "search",
+    "passage_selected",
+}
 
 MAX_BODY = 2_000_000
 ASSETS = {
@@ -43,14 +52,35 @@ class ReviewHandle:
         self.close()
 
 
-def open_review(bundle, store, hooks=None, launch=True, port=0, assessor=""):
-    bundle = validate_bundle(
-        bundle.model_dump(mode="json") if hasattr(bundle, "model_dump") else bundle
-    )
+class BlindingViolation(ValueError):
+    pass
+
+
+def open_review(
+    bundle, store, hooks=None, launch=True, port=0, assessor="", blind_markers=()
+):
+    """Serve one review task on loopback.
+
+    blind_markers are caller-known identity or machine-label strings (model
+    names, arm codes, judge verdict tokens). Outside adjudication, a bundle or
+    API response containing one is refused rather than shown.
+    """
+    markers = blind_terms(blind_markers)
+
+    def checked(b):
+        b = validate_bundle(b.model_dump(mode="json") if hasattr(b, "model_dump") else b)
+        if b.task_kind != "adjudication":
+            found = blind_violations(b.model_dump(mode="json"), markers)
+            if found:
+                raise BlindingViolation(f"bundle {b.bundle_id} exposes {len(found)} blinded marker(s)")
+        return b
+
+    bundle = checked(bundle)
     store.register(bundle)
     hooks = hooks or Hooks()
     token = secrets.token_urlsafe(32)
     current = [bundle]
+    views = [evidence_views(bundle)]
     mutex = threading.RLock()
 
     class Handler(BaseHTTPRequestHandler):
@@ -58,6 +88,13 @@ def open_review(bundle, store, hooks=None, launch=True, port=0, assessor=""):
             pass  # No content/token in server logs.
 
         def response(self, code, body, mime="application/json"):
+            if (
+                mime == "application/json"
+                and current[0].task_kind != "adjudication"
+                and blind_violations(body, markers)
+            ):
+                # Never send it; the error names no marker.
+                code, body = 500, {"error": "blinding violation: response withheld"}
             data = (
                 json.dumps(body, ensure_ascii=False, allow_nan=False).encode()
                 if mime == "application/json"
@@ -102,6 +139,10 @@ def open_review(bundle, store, hooks=None, launch=True, port=0, assessor=""):
             with mutex:
                 if self.path == "/api/bundle":
                     self.response(200, current[0].model_dump(mode="json"))
+                elif self.path == "/api/evidence":
+                    self.response(
+                        200, {"views": views[0], "inventory": inventory(current[0])}
+                    )
                 elif self.path == "/api/state":
                     self.response(
                         200,
@@ -122,6 +163,7 @@ def open_review(bundle, store, hooks=None, launch=True, port=0, assessor=""):
                 "/api/submit",
                 "/api/reconcile",
                 "/api/next",
+                "/api/event",
             ):
                 self.response(404, {"error": "unknown path"})
                 return
@@ -142,6 +184,21 @@ def open_review(bundle, store, hooks=None, launch=True, port=0, assessor=""):
                         or body.get("bundle_hash") != b.bundle_hash
                     ):
                         raise Conflict("bundle changed")
+                    if self.path == "/api/event":
+                        kind, subject = body.get("kind"), body.get("subject", "")
+                        if (
+                            set(body) - {"bundle_id", "bundle_hash", "kind", "subject"}
+                            or kind not in EVENT_KINDS
+                            or not isinstance(subject, str)
+                            or len(subject) > 200
+                        ):
+                            raise ValueError("invalid navigation event")
+                        store.append_event(
+                            b.bundle_id,
+                            {"kind": kind, "subject": subject, "verification": False},
+                        )
+                        self.response(200, {"recorded": True})
+                        return
                     if self.path == "/api/next":
                         state = store.load_task(b.bundle_id)
                         if (
@@ -153,9 +210,10 @@ def open_review(bundle, store, hooks=None, launch=True, port=0, assessor=""):
                         if nxt is None:
                             self.response(200, {"done": True})
                             return
-                        nxt = validate_bundle(nxt.model_dump(mode="json"))
+                        nxt = checked(nxt)
                         store.register(nxt)
                         current[0] = nxt
+                        views[0] = evidence_views(nxt)
                         self.response(200, {"bundle": nxt.model_dump(mode="json")})
                         return
                     if self.path == "/api/reconcile":

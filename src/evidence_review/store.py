@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Protocol
-from .contracts import Judgment, Defect, ReviewSubmission, digest, now
+from .contracts import PACKAGE_VERSION, Judgment, Defect, ReviewSubmission, digest, now
 from .evidence import passage
 
 
@@ -92,6 +92,13 @@ def validate_answers(bundle, answers, complete=False):
             raise ValueError(f"explanation required: {key}")
         if complete and field.evidence_required and not j.selections:
             raise ValueError(f"evidence required: {key}")
+        if (
+            complete
+            and bundle.task_kind == "adjudication"
+            and not field.require_true
+            and not j.note.strip()
+        ):
+            raise ValueError(f"adjudication reason required: {key}")
     for field in bundle.form:
         if complete and field.required:
             j = judgments.get(field.field_id)
@@ -204,8 +211,18 @@ class FileStore:
 
     def append_event(self, task_id, event):
         with self._lock(task_id) as d:
-            self._events(d)
+            self._state(d)
             self._append(d, {"event": "external", "at": now(), "detail": event})
+
+    def activity(self, task_id):
+        """Navigation counts. Opening evidence is exposure, never verification."""
+        with self._lock(task_id) as d:
+            counts = {}
+            for e in self._events(d):
+                if e.get("event") == "external" and isinstance(e.get("detail"), dict):
+                    kind = e["detail"].get("kind", "other")
+                    counts[kind] = counts.get(kind, 0) + 1
+            return {"counts": dict(sorted(counts.items())), "verification": False}
 
     def _state(self, directory):
         states = [e["state"] for e in self._events(directory) if "state" in e]
@@ -319,7 +336,18 @@ class FileStore:
                     **cleaned,
                     complete=True,
                     amendment_reason=amendment_reason,
-                    provenance={"schema": "review-bundle/v1", **bundle.document_hashes},
+                    provenance={
+                        "schema": "review-bundle/v1",
+                        **bundle.document_hashes,
+                        "submission_schema": "review-submission/v1",
+                        "package_version": PACKAGE_VERSION,
+                        "task_kind": bundle.task_kind,
+                        **(
+                            {"amends_revision": str(state["last_submission"])}
+                            if state["last_submission"]
+                            else {}
+                        ),
+                    },
                 )
                 state["submissions"][str(revision)] = submission.model_dump(mode="json")
                 state["last_submission"] = revision

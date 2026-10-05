@@ -33,7 +33,8 @@ if [ "$DRAFT" = true ]; then
   python3 -c 'import json,os; from pathlib import Path; p=json.loads(Path("artifacts/release.json").read_text()); p["target_commitish"]==os.environ["GITHUB_SHA"] or (_ for _ in ()).throw(ValueError("draft belongs to another source; do not replace it")); Path("artifacts/CHANGELOG.md").write_text(p["body"]+"\n")'
   TAG_SHA=$(gh api "repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha)
   [ "$TAG_SHA" = "$GITHUB_SHA" ] || { echo 'Version tag changed' >&2; exit 1; }
-  gh release upload "$TAG" artifacts/*.whl artifacts/SHA256SUMS artifacts/package-verification.json artifacts/CHANGELOG.md --repo "$GITHUB_REPOSITORY" --clobber
+  # Measurement provenance outlives the 14-day CI artifact.
+  gh release upload "$TAG" artifacts/*.whl artifacts/SHA256SUMS artifacts/package-verification.json artifacts/CHANGELOG.md artifacts/coverage.json artifacts/dependency-audit.json artifacts/wheelhouse.json --repo "$GITHUB_REPOSITORY" --clobber
 fi
 mkdir -p artifacts/existing
 gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern SHA256SUMS --pattern '*.whl' --pattern package-verification.json --pattern CHANGELOG.md --dir artifacts/existing --clobber

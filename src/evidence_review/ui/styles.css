@@ -65,6 +65,47 @@ button:disabled {
 }
 .unresolved {
   background: #ffe5e2;
+  border-bottom-style: dashed;
+}
+/* Shape markers keep state visible without colour. */
+.unresolved::after {
+  content: " ?";
+  font-weight: 700;
+}
+.identifier {
+  background: #eef0f3;
+  border-bottom: 2px dotted #4c5e6b;
+}
+.identifier::after {
+  content: " #";
+}
+.context {
+  font-family: ui-monospace, monospace;
+  white-space: pre-wrap;
+  border-left: 3px solid #879bad;
+  padding-left: 0.5rem;
+  margin: 0.4rem 0;
+}
+.ctx.cited {
+  background: #d9edff;
+  font-weight: 600;
+}
+.ctx.table_header {
+  font-style: italic;
+}
+.legend span {
+  display: inline-block;
+  margin-right: 0.4rem;
+}
+#continuation.hook-failed,
+#continuation.hook-unknown,
+#conflict {
+  color: #a31a1a;
+}
+#conflict {
+  border: 2px solid #a31a1a;
+  padding: 0.5rem;
+  margin-top: 0.5rem;
 }
 pre,
 .report-text {
@@ -93,11 +134,13 @@ pre,
 .save-error {
   color: #a31a1a;
 }
-button:focus,
-input:focus,
-textarea:focus,
-select:focus {
-  outline: 3px solid #527fff;
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+summary:focus-visible {
+  outline: 3px solid #1f4fd1;
+  outline-offset: 2px;
 }
 small {
   display: block;
