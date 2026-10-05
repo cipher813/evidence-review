@@ -8,13 +8,18 @@ set -eu
 python3 -c 'import hashlib,json,os,re; from pathlib import Path; p=json.loads(Path("artifacts/package-verification.json").read_text()); wheel=Path("artifacts")/p["wheel"]; valid=p["source_sha"]==os.environ["GITHUB_SHA"] and p["reproducible"] is True and p["clean_install"] is True and re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+",p["version"]) and wheel.parent==Path("artifacts") and wheel.suffix==".whl" and hashlib.sha256(wheel.read_bytes()).hexdigest()==p["sha256"] and Path("artifacts/SHA256SUMS").read_text()==p["sha256"]+"  "+p["wheel"]+"\n"; valid or (_ for _ in ()).throw(ValueError("unverified release input"))'
 VERSION=$(python3 -c 'import json; from pathlib import Path; print(json.loads(Path("artifacts/package-verification.json").read_text())["version"])')
 TAG="v$VERSION"
-if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > artifacts/release.json 2> artifacts/release-error.txt; then
+# releases/tags/<tag> never returns a draft, so a draft left by an interrupted
+# run would look absent and be duplicated. List releases (drafts included for
+# this token) and require at most one match.
+find_release() {
+  gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate --jq ".[] | select(.tag_name == \"$TAG\")" > artifacts/release-match.jsonl || return 2
+  python3 -c 'import json,sys; from pathlib import Path; rows=[json.loads(l) for l in Path("artifacts/release-match.jsonl").read_text().splitlines() if l.strip()]; len(rows)<=1 or (print("several releases carry this tag; resolve by hand",file=sys.stderr), sys.exit(3)); rows and Path("artifacts/release.json").write_text(json.dumps(rows[0])); sys.exit(0 if rows else 1)'
+}
+if find_release; then
   DRAFT=$(python3 -c 'import json; from pathlib import Path; print(str(json.loads(Path("artifacts/release.json").read_text())["draft"]).lower())')
 else
-  if ! grep -q '(HTTP 404)' artifacts/release-error.txt; then
-    cat artifacts/release-error.txt >&2
-    exit 1
-  fi
+  # 1 means absent; anything else (API error, duplicate drafts) stops here.
+  [ $? -eq 1 ] || exit 1
   # The ref endpoint answers 404 for an absent tag; the commits endpoint answers 422.
   if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object.type + " " + .object.sha' > artifacts/tag-sha.txt 2> artifacts/tag-error.txt; then
     [ "$(cat artifacts/tag-sha.txt)" = "commit $GITHUB_SHA" ] || { echo 'Version tag belongs to another source' >&2; exit 1; }
@@ -26,7 +31,7 @@ else
   fi
   gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$TAG" -f target_commitish="$GITHUB_SHA" --jq .body > artifacts/CHANGELOG.md
   gh release create "$TAG" --draft --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "$TAG" --notes-file artifacts/CHANGELOG.md
-  gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > artifacts/release.json
+  find_release || { echo 'Created draft release not found' >&2; exit 1; }
   DRAFT=true
 fi
 if [ "$DRAFT" = true ]; then

@@ -1,6 +1,6 @@
 # Implementation register
 
-Current release candidate: 0.2.0. Earlier bootstrap plan: [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Hardening and release process: [HARDENING.md](HARDENING.md).
+Current release candidate: 0.2.1 (0.2.0 was never published: its release step failed on a draft lookup, fixed in 0.2.1 with no package change). Earlier bootstrap plan: [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Hardening and release process: [HARDENING.md](HARDENING.md).
 
 | Requirement | State | Verification |
 |---|---|---|
@@ -19,4 +19,4 @@ Current release candidate: 0.2.0. Earlier bootstrap plan: [IMPLEMENTATION_PLAN.m
 Ruling: generic form fields carry caller-required decisions; no inference of semantic truth.
 Ruling: no hosted service or registry upload; exact tested commit/wheel is the consumer pin.
 
-Local verification for 0.2.0 (Linux, Python 3.12, uv 0.9.5, empty package cache): full suite green; whole-source Python coverage above the 92.0 floor; two identical wheel builds; clean isolated install from the staged wheelhouse. Hosted CI results are recorded on the pull request and release, not here. Browser timings are automated tests, not measured human effort; no human usability study has been run.
+Local verification for 0.2.1 (Linux, Python 3.12, uv 0.9.5, empty package cache): full suite green; whole-source Python coverage above the 92.0 floor; two identical wheel builds; clean isolated install from the staged wheelhouse. Hosted CI results are recorded on the pull request and release, not here. Browser timings are automated tests, not measured human effort; no human usability study has been run.
