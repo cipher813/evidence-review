@@ -9,7 +9,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-PACKAGE_VERSION = "0.2.3"
+PACKAGE_VERSION = "0.3.0"
 
 
 def canonical_json(value) -> bytes:
@@ -112,6 +112,9 @@ class ReportField(Strict):
     label: str
     text: str
     claim_ids: list[str] = Field(default_factory=list)
+    # "context" is task material shown to the reviewer (the question, a cutoff),
+    # not part of the answer under review; its numbers are never assertions.
+    role: Literal["answer", "context"] = "answer"
 
 
 class NumericSpan(Strict):
@@ -125,6 +128,10 @@ class NumericSpan(Strict):
     ] = "uncited"
     claim_ids: list[str] = Field(default_factory=list)
     reason: str = ""
+    # Evidence bound to this one number, when the producer supplied it: the
+    # source line(s) holding the value, or the calculation and its inputs.
+    citations: list[Citation] = Field(default_factory=list)
+    calculation: Calculation | None = None
 
 
 class ReferenceItem(Strict):
@@ -144,6 +151,10 @@ class FormField(Strict):
     subject_id: str | None = None
     evidence_required: bool = False
     note_required_unless: list[str] = Field(default_factory=list)
+    # Plain-language guidance shown with the control: what the question asks and
+    # what each option means. Display only; never part of an answer's validity.
+    help: str = ""
+    option_help: dict[str, str] = Field(default_factory=dict)
 
 
 class ReviewBundle(Strict):
@@ -153,6 +164,8 @@ class ReviewBundle(Strict):
         "independent"
     )
     document_hashes: dict[str, str]
+    # What the reviewer is asked to do in this task, in plain language.
+    instructions: str = ""
     fields: list[ReportField]
     sources: list[Source]
     spans: list[NumericSpan]
@@ -193,7 +206,15 @@ class ReviewBundle(Strict):
         for n in self.spans:
             if n.state in ("cited", "derived") and not n.claim_ids:
                 raise ValueError("mapped span needs claims")
-        for c in [*self.claims, *self.references]:
+            if n.state == "identifier" and (n.citations or n.calculation):
+                raise ValueError("identifier spans carry no evidence")
+        context = {f.path for f in self.fields if f.role == "context"}
+        for n in self.spans:
+            if n.field_path in context and (
+                n.claim_ids or n.citations or n.calculation or n.state != "identifier"
+            ):
+                raise ValueError("context numbers are not assertions")
+        for c in [*self.claims, *self.references, *self.spans]:
             for citation in c.citations:
                 validate_citation(citation, sources)
             if c.calculation:
@@ -206,6 +227,8 @@ class ReviewBundle(Strict):
         if self.task_kind == "independent" and self.disclosures:
             raise ValueError("independent tasks cannot disclose labels or identity")
         for f in self.form:
+            if set(f.option_help) - set(f.options):
+                raise ValueError("help for an unknown option")
             if f.kind == "choice" and (
                 not f.options or len(set(f.options)) != len(f.options)
             ):

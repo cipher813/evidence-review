@@ -186,3 +186,48 @@ def test_citations_link_to_the_original_lines_and_unresolved_numbers_search(tmp_
         page.goto(h.url)
         page.get_by_role("button", name="24.6%, cited", exact=True).click()
         expect(page.get_by_role("region", name="Evidence")).to_contain_text("No public original is recorded")
+
+
+def bound_bundle():
+    """Each number carries its own evidence, as a producer that binds numbers would send."""
+    b = margin_bundle()
+    claim = b.claims[0]
+    spans = []
+    for n in b.spans:
+        if n.text == "24.6%":
+            n = n.model_copy(update={"citations": [claim.citations[1]]})
+        elif n.text == "180 bps":
+            n = n.model_copy(update={"calculation": claim.calculation})
+        spans.append(n)
+    return b.model_validate({**b.model_dump(mode="json"), "spans": [s.model_dump(mode="json") for s in spans]})
+
+
+def test_bound_numbers_open_their_line_and_calculations_link_every_input(tmp_path):
+    b = bound_bundle()
+    sid = b.sources[0].source_id
+    base = "https://github.com/o/r/blob/abc/doc.md?plain=1"
+    links = {sid: {"url": base, "line_url": base + "#L{start}-L{end}", "label": "Open in source repo"}}
+    store = FileStore(tmp_path)
+    with open_review(b, store, launch=False, source_links=links) as h, sync_playwright() as pw:
+        page = launch(pw).new_page()
+        # Offline test: answer the original's URL locally instead of reaching GitHub.
+        page.context.route("https://github.com/**", lambda r: r.fulfill(body="original", content_type="text/plain"))
+        page.goto(h.url)
+        expect(page.locator("#status")).to_contain_text("Saved locally")
+        report = page.get_by_role("region", name="Report")
+        direct = report.get_by_role("link", name="24.6%, cited, opens the cited line of the original")
+        assert direct.get_attribute("href") == base + "#L6-L6"
+        assert direct.get_attribute("target") == "_blank"
+        with page.context.expect_page() as opened:
+            direct.click()
+        assert opened.value.url.startswith("https://github.com/o/r/blob/abc/doc.md")
+        evidence = page.get_by_role("region", name="Evidence")
+        expect(evidence).to_contain_text("24.6%: cited")
+        expect(evidence.get_by_role("button", name="Whole claim margin")).to_be_visible()
+        page.get_by_role("button", name="180 bps, derived", exact=True).click()
+        expect(evidence).to_contain_text("180 bps: calculated")
+        expect(evidence).to_contain_text("Formula: (current - prior) * 100")
+        inputs = evidence.get_by_role("link", name="Open in source repo, L6")
+        expect(inputs).to_have_count(2)
+        expect(evidence).to_contain_text("Input current: 24.6")
+        expect(evidence).to_contain_text("Input prior: 22.8")

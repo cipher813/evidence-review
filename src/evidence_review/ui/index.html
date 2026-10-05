@@ -24,15 +24,24 @@
     </header>
     <main>
       <section aria-label="Report">
-        <h2>Report</h2>
+        <div id="instructions" aria-label="What to do"></div>
+        <div id="context-box" aria-label="Task context">
+          <h2>Research question</h2>
+          <p class="legend">Given to the research agent. It is not part of the answer you are reviewing.</p>
+          <div id="context"></div>
+        </div>
+        <h2>Answer under review</h2>
         <p class="legend">
           Numbers are buttons. <span class="number">Mapped</span>
+          <span class="number direct">Opens its source line</span>
           <span class="number unresolved">Unresolved</span>
           <span class="number identifier">Date or identifier</span>
         </p>
         <div id="report"></div>
-        <h2>Claims and reference items</h2>
-        <div id="subjects"></div>
+        <details>
+          <summary>All claims and reference items</summary>
+          <div id="subjects"></div>
+        </details>
       </section>
       <section aria-label="Evidence">
         <h2>Evidence</h2>
@@ -47,6 +56,9 @@
       </section>
       <section aria-label="Judgments">
         <h2>Your judgments</h2>
+        <p id="progress" role="status" aria-live="polite" aria-label="Review progress"></p>
+        <div id="items"></div>
+        <h3>Finish</h3>
         <div id="forms"></div>
         <h3>Defects</h3>
         <div id="defects"></div>

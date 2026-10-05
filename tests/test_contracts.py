@@ -77,3 +77,23 @@ def test_year_sized_economic_counts_are_not_identifiers():
         "claim", "The factory shipped 2026 units, versus 2025 units previously."
     )
     assert all(s.state != "identifier" for s in spans)
+
+
+def test_span_evidence_is_validated_like_claim_evidence():
+    import pytest
+    from synthetic import located, margin_claim, build
+
+    b = build([("summary", "Margin was 24.6% in FY2026.", ["margin"])], [margin_claim()],
+              {("summary", "24.6%"): ("cited", ["margin"])})
+    data = b.model_dump(mode="json")
+    span = next(s for s in data["spans"] if s["text"] == "24.6%")
+    span["citations"] = [located(6, "24.6%").model_dump(mode="json")]
+    assert type(b).model_validate(data).spans[0].citations[0].start_line == 6
+    span["citations"] = [located(6, "99.9%").model_dump(mode="json")]
+    with pytest.raises(ValueError, match="excerpt mismatch"):
+        type(b).model_validate(data)
+    span["citations"] = []
+    ident = next(s for s in data["spans"] if s["state"] == "identifier")
+    ident["citations"] = [located(6, "24.6%").model_dump(mode="json")]
+    with pytest.raises(ValueError, match="identifier spans carry no evidence"):
+        type(b).model_validate(data)
