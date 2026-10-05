@@ -160,3 +160,29 @@ def test_independent_browser_traffic_carries_no_blinded_marker(tmp_path):
     assert not [m for m in markers if m in blob]
     # Negative control: the same detector finds a marker that is present.
     assert "window.pwned" in blob
+
+
+def test_citations_link_to_the_original_lines_and_unresolved_numbers_search(tmp_path):
+    b = margin_bundle()
+    sid = b.sources[0].source_id
+    base = "https://github.com/o/r/blob/abc/doc.md?plain=1"
+    links = {sid: {"url": base, "line_url": base + "#L{start}-L{end}", "label": "Open in source repo", "note": "same bytes as the frozen copy"}}
+    with open_review(b, FileStore(tmp_path), launch=False, source_links=links) as h, sync_playwright() as pw:
+        page = launch(pw).new_page()
+        page.goto(h.url)
+        expect(page.locator("#status")).to_contain_text("Saved locally")
+        page.get_by_role("button", name="24.6%, cited", exact=True).click()
+        evidence = page.get_by_role("region", name="Evidence")
+        link = evidence.get_by_role("link", name="Open in source repo, L6").first
+        assert link.get_attribute("href") == base + "#L6-L6"
+        assert link.get_attribute("target") == "_blank"
+        assert "noopener" in link.get_attribute("rel")
+        expect(evidence).to_contain_text("same bytes as the frozen copy")
+        page.get_by_role("button", name="1, uncited", exact=True).click()
+        expect(page.locator("#search")).to_have_value("1")
+        expect(evidence).to_contain_text("a match does not imply support")
+    with open_review(margin_bundle(), FileStore(tmp_path / "nolinks"), launch=False) as h, sync_playwright() as pw:
+        page = launch(pw).new_page()
+        page.goto(h.url)
+        page.get_by_role("button", name="24.6%, cited", exact=True).click()
+        expect(page.get_by_role("region", name="Evidence")).to_contain_text("No public original is recorded")

@@ -8,6 +8,7 @@ import webbrowser
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
+from urllib.parse import urlsplit
 from .contracts import blind_terms, blind_violations, validate_bundle
 from .evidence import evidence_views, inventory
 from .store import Conflict
@@ -19,6 +20,7 @@ EVENT_KINDS = {
     "source_opened",
     "search",
     "passage_selected",
+    "original_opened",
 }
 
 MAX_BODY = 2_000_000
@@ -56,16 +58,63 @@ class BlindingViolation(ValueError):
     pass
 
 
+def source_link_map(source_links):
+    """Validate caller-supplied links from frozen sources to their public originals.
+
+    ``{source_id: {"url": ..., "line_url": ..., "label": ..., "note": ...}}``.
+    ``url`` opens the whole original; ``line_url``, when the original has stable
+    line anchors, is a template whose ``{start}`` and ``{end}`` are replaced
+    with the cited line numbers. Both must be https. Links are navigation aids
+    served beside the bundle, never part of it, so adding one does not change a
+    bundle hash."""
+    links = {}
+    for source_id, link in (source_links or {}).items():
+        if not isinstance(source_id, str) or not isinstance(link, dict):
+            raise ValueError("source link must map a source id to an object")
+        extra = set(link) - {"url", "line_url", "label", "note"}
+        if extra or not all(isinstance(v, str) for v in link.values()):
+            raise ValueError(f"source link for {source_id} has unknown or non-text fields")
+        url = link.get("url", "")
+        parts = urlsplit(url)
+        if parts.scheme != "https" or not parts.netloc or parts.fragment:
+            raise ValueError(f"source link for {source_id} needs an https url without a fragment")
+        line_url = link.get("line_url", "")
+        if line_url:
+            filled = line_url.replace("{start}", "1").replace("{end}", "1")
+            lp = urlsplit(filled)
+            if lp.scheme != "https" or not lp.netloc or "{start}" not in line_url or "{" in filled or "}" in filled:
+                raise ValueError(f"source link for {source_id} has an invalid line_url template")
+        links[source_id] = {
+            "url": url,
+            "line_url": line_url,
+            "label": link.get("label", ""),
+            "note": link.get("note", ""),
+        }
+    return links
+
+
 def open_review(
-    bundle, store, hooks=None, launch=True, port=0, assessor="", blind_markers=()
+    bundle,
+    store,
+    hooks=None,
+    launch=True,
+    port=0,
+    assessor="",
+    blind_markers=(),
+    source_links=None,
 ):
     """Serve one review task on loopback.
 
     blind_markers are caller-known identity or machine-label strings (model
     names, arm codes, judge verdict tokens). Outside adjudication, a bundle or
     API response containing one is refused rather than shown.
+
+    source_links optionally maps source ids to their public originals (see
+    ``source_link_map``); the UI offers each as a link that opens the original
+    at the cited passage, so a reviewer can check the frozen copy against it.
     """
     markers = blind_terms(blind_markers)
+    links = source_link_map(source_links)
 
     def checked(b):
         b = validate_bundle(b.model_dump(mode="json") if hasattr(b, "model_dump") else b)
@@ -141,7 +190,16 @@ def open_review(
                     self.response(200, current[0].model_dump(mode="json"))
                 elif self.path == "/api/evidence":
                     self.response(
-                        200, {"views": views[0], "inventory": inventory(current[0])}
+                        200,
+                        {
+                            "views": views[0],
+                            "inventory": inventory(current[0]),
+                            "links": {
+                                s.source_id: links[s.source_id]
+                                for s in current[0].sources
+                                if s.source_id in links
+                            },
+                        },
                     )
                 elif self.path == "/api/state":
                     self.response(

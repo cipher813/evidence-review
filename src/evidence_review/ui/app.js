@@ -21,6 +21,45 @@ function el(tag, text) {
   if (text !== undefined) n.textContent = text;
   return n;
 }
+// Text fragment (#:~:text=) so the original opens at the cited words where the
+// browser supports it; otherwise it opens at the top and the excerpt is shown here.
+function fragmentFor(excerpt) {
+  const words = (excerpt || "")
+    .split("\n")
+    .map((line) => line.replace(/[|*#>_`]/g, " ").replace(/\s+/g, " ").trim())
+    .find((line) => line.split(" ").length >= 3);
+  if (!words) return "";
+  const enc = (t) => encodeURIComponent(t).replace(/-/g, "%2D").replace(/,/g, "%2C").replace(/&/g, "%26");
+  return "#:~:text=" + enc(words.split(" ").slice(0, 8).join(" "));
+}
+function originalLink(sourceId, excerpt, start, end) {
+  const link = (evidence.links || {})[sourceId];
+  if (!link) {
+    const none = el(
+      "p",
+      "No public original is recorded for this source; only the frozen copy can be checked.",
+    );
+    none.className = "no-original";
+    return none;
+  }
+  const wrap = el("p");
+  const lines = start ? (end && end !== start ? `L${start}–L${end}` : `L${start}`) : "";
+  const a = el(
+    "a",
+    (link.label || "Open the original document") + (lines && link.line_url ? `, ${lines}` : ""),
+  );
+  a.href =
+    start && link.line_url
+      ? link.line_url.replaceAll("{start}", String(start)).replaceAll("{end}", String(end || start))
+      : link.url + fragmentFor(excerpt);
+  a.target = "_blank";
+  a.rel = "noopener noreferrer";
+  a.className = "original-link";
+  a.onclick = () => logEvent("original_opened", sourceId);
+  wrap.append(a);
+  if (link.note) wrap.append(el("small", " " + link.note));
+  return wrap;
+}
 async function api(path, body) {
   const r = await fetch(path, {
     method: body ? "POST" : "GET",
@@ -207,6 +246,7 @@ function showSource(source, start = 1, end = start) {
   );
   box.append(el("small", "Frozen SHA-256: " + source.sha256));
   const lines = source.text.split("\n");
+  box.append(originalLink(source.source_id, lines.slice(start - 1, end).join("\n"), start, end));
   const wrap = el("div");
   let anchor = null;
   lines.forEach((text, i) => {
@@ -280,6 +320,8 @@ function cite(c) {
         el("small", "Table header detection is heuristic; open the full source to confirm."),
       );
   }
+  if (c.start_line !== null)
+    box.append(originalLink(c.source_id, c.excerpt, c.start_line, c.end_line));
   const source = bundle.sources.find((s) => s.source_id === c.source_id);
   if (source) {
     const btn = el("button", "Open full frozen source");
@@ -363,6 +405,14 @@ function showSpan(span) {
       b.onclick = () => showSubject(c, c.claim_id);
       $("evidence").append(b);
     });
+    if (["uncited", "ambiguous", "unavailable"].includes(span.state)) {
+      // Offer every frozen line containing the number; a match is a lead, not support.
+      $("search").value = span.text;
+      $("search").oninput();
+      $("evidence").append(
+        el("p", `Lines containing "${span.text}" are listed under the source search; a match does not imply support.`),
+      );
+    }
   }
 }
 function renderReport() {
