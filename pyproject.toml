@@ -9,7 +9,7 @@ dependencies = ["pydantic==2.13.5"]
 [project.scripts]
 evidence-review = "evidence_review.cli:main"
 [dependency-groups]
-dev = ["pytest==9.1.1", "pytest-cov==7.0.0", "playwright==1.58.0"]
+dev = ["pytest==9.1.1", "pytest-cov==7.1.0", "playwright==1.63.0"]
 [build-system]
 requires = ["hatchling==1.29.0"]
 build-backend = "hatchling.build"
