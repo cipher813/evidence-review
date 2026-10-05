@@ -104,6 +104,7 @@ def test_wheel_integrity_rejects_changed_license_or_schema(tmp_path):
         "wrong-tag",
         "no-tag",
         "ref-error",
+        "duplicate",
     ],
 )
 def test_publisher_only_creates_on_true_absence(tmp_path, failure):
@@ -145,11 +146,17 @@ with Path("calls").open("a") as f: f.write(json.dumps(a)+"\\n")
 mode=os.environ["TEST_FAILURE"]
 sha=os.environ["GITHUB_SHA"]
 if a[0]=="api" and "/releases/tags/" in a[1]:
+    # Real GitHub never returns a draft here, so this lookup cannot find one.
     if mode in ("existing","stale"): print(json.dumps({"draft":False,"target_commitish":sha,"body":"Changes"}))
-    elif mode in ("draft","upload-failure") or Path("created").exists(): print(json.dumps({"draft":True,"target_commitish":sha,"body":"Changes"}))
-    else:
-        code="HTTP 404" if mode in ("wrong-tag","no-tag","ref-error") else mode
-        print("gh: failed ("+code+")",file=sys.stderr); sys.exit(1)
+    else: print("gh: Not Found (HTTP 404)",file=sys.stderr); sys.exit(1)
+elif a[0]=="api" and "/releases?" in a[1]:
+    draft={"tag_name":"v0.1.0","draft":True,"target_commitish":sha,"body":"Changes"}
+    if mode in ("HTTP 503","HTTP 401"):
+        print("gh: failed ("+mode+")",file=sys.stderr); sys.exit(1)
+    elif mode in ("existing","stale"): print(json.dumps(dict(draft,draft=False)))
+    elif mode in ("draft","upload-failure") or Path("created").exists(): print(json.dumps(draft))
+    elif mode=="duplicate":
+        print(json.dumps(draft)); print(json.dumps(draft))
 elif a[0]=="api" and "/commits/v" in a[1]:
     # Real GitHub answers 422, never 404, for a commit lookup by a missing tag.
     print("gh: No commit found (HTTP 422)",file=sys.stderr); sys.exit(1)
@@ -196,7 +203,7 @@ else: print("b"*40)
     )
     calls = [json.loads(line) for line in (tmp_path / "calls").read_text().splitlines()]
     creates = [call for call in calls if call[:2] == ["release", "create"]]
-    if failure in ("HTTP 503", "HTTP 401"):
+    if failure in ("HTTP 503", "HTTP 401", "duplicate"):
         assert result.returncode != 0
         assert len(calls) == 1 and not creates
     elif failure in ("upload-failure", "wrong-tag", "ref-error"):
