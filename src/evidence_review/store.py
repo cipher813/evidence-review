@@ -8,6 +8,7 @@ import os
 import re
 import secrets
 import threading
+import time
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -38,6 +39,10 @@ class Store(Protocol):
         amendment_reason="",
     ): ...
     def export_submission(self, task_id, revision): ...
+    # Continuation ownership used by run_hook; each must be atomic per task.
+    def claim_hook(self, task_id, revision, expected_attempt, reconcile=False, lease=30.0): ...
+    def settle_hook(self, task_id, revision, attempt, claim, status, late=False): ...
+    def require_reconciliation(self, task_id, revision, reason): ...
 
 
 def atomic(path, data):
@@ -402,12 +407,113 @@ class FileStore:
         state = self.load_task(task_id)
         return ReviewSubmission.model_validate(state["submissions"][str(revision)])
 
+    def _write_hook(self, d, state, hook, event="hook_status"):
+        state["hook"] = hook
+        self._append(d, {"event": event, "at": now(), "state": state})
+        atomic(d / "snapshot.json", json.dumps(state, ensure_ascii=False).encode())
+        return state
+
     def hook_status(self, task_id, revision, status):
+        """Unconditionally record a continuation outcome (operator override).
+
+        Replacing the record drops any attempt claim, so an in-flight or late
+        result for a claimed attempt is fenced out afterwards."""
         with self._lock(task_id) as d:
             state = self._state(d)
             if state["last_submission"] != revision:
                 raise Conflict("stale hook result")
-            state["hook"] = {**status, "revision": revision}
-            self._append(d, {"event": "hook_status", "at": now(), "state": state})
-            atomic(d / "snapshot.json", json.dumps(state).encode())
-            return state
+            return self._write_hook(d, state, {**status, "revision": revision})
+
+    def claim_hook(self, task_id, revision, expected_attempt, reconcile=False, lease=30.0):
+        """Compare-and-set ownership of the next continuation attempt.
+
+        Under the task lock: the claim succeeds only if the submission is still
+        current, the outcome is not already succeeded, the recorded attempt is
+        still ``expected_attempt`` (no competing claim landed since the caller
+        read it), and either this is the first invocation or, for
+        reconciliation, no other attempt holds an unexpired lease. Returns
+        ``(state, claim)``; ``claim`` is None when this caller does not own an
+        attempt and must not run a callback. The lock is released before
+        returning, so callbacks never run under it."""
+        with self._lock(task_id) as d:
+            state = self._state(d)
+            if state["last_submission"] != revision:
+                raise Conflict("stale hook claim")
+            hook = state["hook"]
+            if hook["status"] == "succeeded" or hook.get("attempt", 0) != expected_attempt:
+                return state, None
+            if not reconcile and hook.get("invoked"):
+                return state, None
+            lease_expires = hook.get("lease_expires")
+            if (
+                reconcile
+                and hook["status"] == "pending"
+                and hook.get("invoked")
+                and isinstance(lease_expires, (int, float))
+                and time.time() < lease_expires
+            ):
+                return state, None  # another attempt is still within its deadline
+            claim = secrets.token_hex(16)
+            seconds = lease if isinstance(lease, (int, float)) and math.isfinite(lease) else 86400.0
+            self._write_hook(
+                d,
+                state,
+                {
+                    "status": "pending",
+                    "identifier": None,
+                    "reason": "continuation in progress; crash requires reconciliation",
+                    "invoked": True,
+                    "attempt": expected_attempt + 1,
+                    "claim": claim,
+                    "lease_expires": time.time() + min(max(seconds, 0.0), 86400.0),
+                    "revision": revision,
+                },
+                "hook_claimed",
+            )
+            return state, claim
+
+    def settle_hook(self, task_id, revision, attempt, claim, status, late=False):
+        """Record the outcome of a claimed attempt only if it still owns the record.
+
+        Compares revision, attempt and claim under the task lock. An on-time
+        result requires the attempt still pending; a late result requires it
+        still recorded as unknown. Returns ``(state, recorded)``; a fenced
+        result leaves the newer record untouched."""
+        with self._lock(task_id) as d:
+            state = self._state(d)
+            if state["last_submission"] != revision:
+                raise Conflict("stale hook result")
+            hook = state["hook"]
+            expected = "unknown" if late else "pending"
+            if (
+                hook.get("revision") != revision
+                or hook.get("attempt") != attempt
+                or hook.get("claim") != claim
+                or hook["status"] != expected
+            ):
+                return state, False
+            record = {**status, "invoked": True, "attempt": attempt, "claim": claim, "revision": revision}
+            return self._write_hook(d, state, record), True
+
+    def require_reconciliation(self, task_id, revision, reason):
+        """Note that only the caller can resolve the outcome, keeping ownership fields."""
+        with self._lock(task_id) as d:
+            state = self._state(d)
+            if state["last_submission"] != revision:
+                raise Conflict("stale hook result")
+            hook = state["hook"]
+            if hook["status"] == "succeeded":
+                return state
+            return self._write_hook(
+                d,
+                state,
+                {
+                    **hook,
+                    "status": hook["status"] if hook["status"] in ("failed", "unknown") else "pending",
+                    "identifier": None,
+                    "reason": reason,
+                    "invoked": True,
+                    "attempt": hook.get("attempt", 0),
+                    "revision": revision,
+                },
+            )
