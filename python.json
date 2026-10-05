@@ -1,1 +1,7 @@
-{"schemaVersion": 1, "label": "Python", "message": "not measured", "color": "lightgrey"}
+{
+  "schemaVersion": 1,
+  "label": "Python",
+  "message": ">=3.12,<3.13",
+  "color": "blue",
+  "sourceSha": "5c34d3f51d67f71b8b0c47b23f6a1a9f8fee4fa1"
+}

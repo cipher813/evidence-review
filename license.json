@@ -1,1 +1,7 @@
-{"schemaVersion": 1, "label": "license", "message": "not measured", "color": "lightgrey"}
+{
+  "schemaVersion": 1,
+  "label": "license",
+  "message": "MIT",
+  "color": "blue",
+  "sourceSha": "5c34d3f51d67f71b8b0c47b23f6a1a9f8fee4fa1"
+}
