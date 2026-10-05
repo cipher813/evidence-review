@@ -1,39 +1,62 @@
 # Evidence Review
 
-Local evidence-linked human review for reports, claims and calculations.
+[![CI](https://github.com/nousergon/evidence-review/actions/workflows/ci.yml/badge.svg)](https://github.com/nousergon/evidence-review/actions/workflows/ci.yml)
+![Python coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fnousergon%2Fevidence-review%2Fbadges%2Fcoverage.json)
+![License](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fnousergon%2Fevidence-review%2Fbadges%2Flicense.json)
+![Python](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fnousergon%2Fevidence-review%2Fbadges%2Fpython.json)
 
-## What it does
-A reusable Python package and local browser app for inspecting documents against sources and recording human judgments. The tool automates navigation, metadata, autosave and structured exports.
+## What is this?
 
-## Current status and running it
-Implementation under review; no registry release published. See [SPEC.md](SPEC.md) and [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). The runnable demo uses artificial data and requires no account or network.
+A reusable Python package and local browser app for checking reports, claims and calculations against frozen sources and recording human judgments. It automates evidence navigation, autosave, revisions and structured exports. Review data stays with the caller; the app does not call models or upload documents.
 
-## Verification
-Local verification: 20 tests passed, including actual Chromium. Whole Python package coverage: 91% on Python 3.12/macOS; JavaScript behavior is exercised through browser tests, not included in that percentage.
+## Why does it exist?
 
-## Ownership and contributions
-Maintained by @cipher813. Open an issue for design/bug feedback; see [SECURITY.md](SECURITY.md) for sensitive reports. Do not attach private documents or credentials.
+Report assessment requires both a readable report and its underlying evidence. Evidence Review places them together and records explicit decisions with source passages and immutable revisions. Arithmetic and matching excerpts assist review; they do not establish semantic support or replace human judgment.
 
-## License
-MIT; see [LICENSE](LICENSE). The initial package is distributed through its exact reviewed Git commit; no registry release is implied.
+## How do I run it?
 
-## Local use
-Requires Python 3.12. Install the tested commit (replace `<commit>` with the reviewed full SHA):
+Requires Python 3.12. The browser app works on macOS and Linux. Install the tested wheel from a [GitHub release](https://github.com/nousergon/evidence-review/releases), verifying its SHA256SUMS first, or install an exact reviewed source commit:
 
 ```sh
-pip install "evidence-review @ git+https://github.com/cipher813/evidence-review.git@<commit>"
+pip install "evidence-review @ git+https://github.com/nousergon/evidence-review.git@<full-reviewed-commit>"
 evidence-review demo
 ```
 
-The demo is artificial and needs no account or network at runtime. For your own validated bundle:
+The demo uses artificial data and needs no account or network at runtime. For your own validated bundle:
 
 ```sh
 evidence-review serve --bundle bundle.json --state-dir review-data
 ```
 
-Enter your assessor name once. Click a report number or claim, open its frozen source, then click the first and last source line to select a passage. Attach it to your judgment. Choose support/coverage explicitly; record defects and materiality when applicable. Answers save locally after acknowledgement. Submit only after reviewing the full report; later submissions require an amendment reason. Local save and caller continuation/backup status are separate.
+Enter your assessor name once. Click a report number or claim, open its frozen source, then select its first and last source line to attach a passage. Choose support and coverage explicitly; record defects and materiality when applicable. Submit after reviewing the full report. Later submissions require an amendment reason.
 
-The access URL is a local session credential. Keep it private. State directories contain report/source hashes, answers, assessor identity and immutable revisions; protect and back them up through your consumer. The generic app does not push Git or call models.
+Each text edit saves on input and displays Saving until acknowledgement. Required boolean decisions accept explicit Yes or No; completion acknowledgements require Yes. Local save and caller continuation/backup status are separate.
+
+The access URL is a local session credential. Protect it and the state directory, which contains hashes, assessor identity, answers and immutable revisions. Back up state through your consumer; the generic app does not push Git.
+
+## How do I verify it?
+
+```sh
+uv sync --frozen
+uv run --frozen playwright install chromium
+bash scripts/check.sh
+```
+
+A healthy result is a green full suite, a passing whole-source coverage floor, identical wheels from two builds and a clean isolated install. CI additionally audits locked runtime dependencies and preserves verification artifacts. Python coverage includes all package and Python delivery-script files; JavaScript is exercised through real Chromium tests and is not included in that percentage.
+
+CI publishes measured badge JSON only after a successful main run; absent measurements display unknown. Main-only publication creates an immutable versioned wheel, checksums, package verification record and generated changelog in a GitHub release. Different wheel content requires a version bump. No PyPI release is implied.
+
+Tests cover two bundle shapes, source/hash/locator checks, calculations, replay, stale tabs, revisions, hooks and loopback authorization. Browser timings are synthetic tests, not a human usability study. Numeric extraction is deterministic; missing or ambiguous evidence remains visible. Source-table header discovery is heuristic; full text and footnotes remain available.
+
+## Where is the rest?
+
+- [SPEC.md](SPEC.md): contracts and intended behavior.
+- [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md): implementation design.
+- [BUILD_STATUS.md](BUILD_STATUS.md) and [HARDENING.md](HARDENING.md): verification and hardening register.
+- [CONTRIBUTING.md](CONTRIBUTING.md): changes and verification.
+- [SECURITY.md](SECURITY.md): private disclosure and response targets.
+- [GitHub releases](https://github.com/nousergon/evidence-review/releases): tested distributions and generated changelogs.
+- [LICENSE](LICENSE): MIT, maintained by @cipher813.
 
 ## Embedded use
 
@@ -47,17 +70,4 @@ with open_review(bundle, FileStore("review-data"), Hooks(on_submission=your_call
     wait_for_user()
 ```
 
-Callbacks receive recursively immutable submissions. Return `status` (`pending`, `succeeded`, `failed`), a durable `identifier` for success, and `reason`. Revisions use `on_revision`. A crash during a callback leaves continuation pending: `reconcile` must resolve the caller's idempotent operation; arbitrary side effects are never automatically retried. Optional `next_bundle` supplies the caller-owned queue after successful submission.
-
-## Verification and limits
-
-```sh
-uv sync --frozen
-uv run playwright install chromium
-uv run pytest
-uv build
-```
-
-Tests exercise actual Chromium, two consumer bundle shapes, source/hash/locator checks, write-ahead replay, optimistic revisions, stale tabs, hook failure and loopback authorization. Schemas ship in the wheel. This release is a small local review tool, not a multi-user hosted platform. Numeric extraction is deterministic, not a semantic evidence linker: missing/ambiguous associations stay visible. Source-table header discovery is heuristic; full text and footnotes remain available. Human judgments remain human; neither arithmetic nor matching excerpts establish support. Administrative workflow tests are not a measured human usability study.
-
-Required boolean fields accept explicit Yes or No; completion acknowledgements declare require_true. Source metadata and calculation tolerances remain visible. Every text input saves on input and displays Saving until acknowledgement. Unacknowledged edits are never claimed durable.
+Callbacks receive recursively immutable submissions. Return status (pending, succeeded, failed), a durable identifier for success and a reason. Revisions use on_revision. A crash leaves continuation pending: reconcile must resolve the caller's idempotent operation; arbitrary side effects are never automatically retried. Optional next_bundle supplies the caller-owned queue after successful submission.
