@@ -170,7 +170,7 @@ def evidence_views(bundle):
     """Context for every located citation, keyed source:start:end, for display."""
     sources = {s.source_id: s for s in bundle.sources}
     views = {}
-    for item in [*bundle.claims, *bundle.references]:
+    for item in [*bundle.claims, *bundle.references, *bundle.spans]:
         cites = list(item.citations)
         if item.calculation:
             cites += [o.citation for o in item.calculation.operands if o.citation]
@@ -186,8 +186,10 @@ def evidence_views(bundle):
 def inventory(bundle):
     """Deterministic evidence counts; zero means not observed, not verified."""
     spans = {}
+    bound = 0
     for n in bundle.spans:
         spans[n.state] = spans.get(n.state, 0) + 1
+        bound += bool(n.citations or n.calculation)
     unresolved_claims = []
     inaccessible = 0
     failed = []
@@ -208,11 +210,17 @@ def inventory(bundle):
     return {
         "spans_by_state": dict(sorted(spans.items())),
         "span_total": len(bundle.spans),
+        "spans_with_own_evidence": bound,
         "claims": len(bundle.claims),
         "references": len(bundle.references),
         "unresolved_subjects": sorted(unresolved_claims),
         "unresolved_citations": inaccessible,
         "calculations_not_matching": sorted(failed),
+        "span_calculations_not_matching": sorted(
+            n.span_id
+            for n in bundle.spans
+            if n.calculation and n.calculation.recomputation.get("status") != "match"
+        ),
     }
 
 

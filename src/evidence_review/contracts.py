@@ -9,7 +9,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-PACKAGE_VERSION = "0.2.3"
+PACKAGE_VERSION = "0.3.0"
 
 
 def canonical_json(value) -> bytes:
@@ -125,6 +125,10 @@ class NumericSpan(Strict):
     ] = "uncited"
     claim_ids: list[str] = Field(default_factory=list)
     reason: str = ""
+    # Evidence bound to this one number, when the producer supplied it: the
+    # source line(s) holding the value, or the calculation and its inputs.
+    citations: list[Citation] = Field(default_factory=list)
+    calculation: Calculation | None = None
 
 
 class ReferenceItem(Strict):
@@ -193,7 +197,9 @@ class ReviewBundle(Strict):
         for n in self.spans:
             if n.state in ("cited", "derived") and not n.claim_ids:
                 raise ValueError("mapped span needs claims")
-        for c in [*self.claims, *self.references]:
+            if n.state == "identifier" and (n.citations or n.calculation):
+                raise ValueError("identifier spans carry no evidence")
+        for c in [*self.claims, *self.references, *self.spans]:
             for citation in c.citations:
                 validate_citation(citation, sources)
             if c.calculation:

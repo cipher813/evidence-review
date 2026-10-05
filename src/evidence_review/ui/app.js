@@ -32,6 +32,21 @@ function fragmentFor(excerpt) {
   const enc = (t) => encodeURIComponent(t).replace(/-/g, "%2D").replace(/,/g, "%2C").replace(/&/g, "%26");
   return "#:~:text=" + enc(words.split(" ").slice(0, 8).join(" "));
 }
+function originalHref(sourceId, excerpt, start, end) {
+  const link = (evidence.links || {})[sourceId];
+  if (!link) return null;
+  return start && link.line_url
+    ? link.line_url.replaceAll("{start}", String(start)).replaceAll("{end}", String(end || start))
+    : link.url + fragmentFor(excerpt);
+}
+// A number bound to exactly one located source line opens that line directly.
+function directCitation(span) {
+  if (span.calculation || span.citations.length !== 1) return null;
+  const c = span.citations[0];
+  if (c.status !== "located") return null;
+  const href = originalHref(c.source_id, c.excerpt, c.start_line, c.end_line);
+  return href ? { citation: c, href } : null;
+}
 function originalLink(sourceId, excerpt, start, end) {
   const link = (evidence.links || {})[sourceId];
   if (!link) {
@@ -48,10 +63,7 @@ function originalLink(sourceId, excerpt, start, end) {
     "a",
     (link.label || "Open the original document") + (lines && link.line_url ? `, ${lines}` : ""),
   );
-  a.href =
-    start && link.line_url
-      ? link.line_url.replaceAll("{start}", String(start)).replaceAll("{end}", String(end || start))
-      : link.url + fragmentFor(excerpt);
+  a.href = originalHref(sourceId, excerpt, start, end);
   a.target = "_blank";
   a.rel = "noopener noreferrer";
   a.className = "original-link";
@@ -333,7 +345,7 @@ function cite(c) {
 function showSubject(item, id) {
   subject = id;
   selection = null;
-  logEvent("subject_opened", id);
+  logEvent("subject_opened", id || "");
   $("evidence").replaceChildren(el("h3", item.text));
   (item.citations || []).forEach(cite);
   if (item.calculation) {
@@ -389,7 +401,22 @@ function showSpan(span) {
   const linked = span.claim_ids
     .map((id) => bundle.claims.find((c) => c.claim_id === id))
     .filter(Boolean);
-  if (linked.length === 1) showSubject(linked[0], linked[0].claim_id);
+  if (span.citations.length || span.calculation) {
+    // Evidence bound to this number, then the claim it belongs to.
+    const item = {
+      text: `${span.text}: ${span.calculation ? "calculated" : "cited"}`,
+      citations: span.citations,
+      calculation: span.calculation,
+    };
+    const claim = linked.length === 1 ? linked[0] : null;
+    showSubject(item, claim ? claim.claim_id : null);
+    if (claim) {
+      const b = el("button", `Whole claim ${claim.claim_id}: ${claim.text}`);
+      b.className = "claim-link";
+      b.onclick = () => showSubject(claim, claim.claim_id);
+      $("evidence").append(b);
+    }
+  } else if (linked.length === 1) showSubject(linked[0], linked[0].claim_id);
   else {
     subject = null;
     $("evidence").replaceChildren(
@@ -429,18 +456,33 @@ function renderReport() {
     const chars = Array.from(f.text);
     spans.forEach((s) => {
       p.append(document.createTextNode(chars.slice(offset, s.start).join("")));
-      const b = el("button", s.text);
+      const direct = directCitation(s);
+      const b = el(direct ? "a" : "button", s.text);
+      if (direct) {
+        // One click lands on the cited line of the original; the panel shows the same line.
+        b.href = direct.href;
+        b.target = "_blank";
+        b.rel = "noopener noreferrer";
+      }
       b.className =
         "number " +
         (["uncited", "ambiguous", "unavailable"].includes(s.state)
           ? "unresolved"
           : s.state === "identifier"
             ? "identifier"
-            : "");
+            : direct
+              ? "direct"
+              : "");
       b.title = s.state + (s.reason ? ": " + s.reason : "");
       // State is part of the accessible name, not conveyed by colour alone.
-      b.setAttribute("aria-label", `${s.text}, ${s.state}`);
-      b.onclick = () => showSpan(s);
+      b.setAttribute(
+        "aria-label",
+        `${s.text}, ${s.state}${direct ? ", opens the cited line of the original" : ""}`,
+      );
+      b.onclick = () => {
+        showSpan(s);
+        if (direct) logEvent("original_opened", direct.citation.source_id);
+      };
       p.append(b);
       offset = s.end;
     });
