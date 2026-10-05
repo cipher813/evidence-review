@@ -206,6 +206,18 @@
           },
           "title": "Note Required Unless",
           "type": "array"
+        },
+        "help": {
+          "default": "",
+          "title": "Help",
+          "type": "string"
+        },
+        "option_help": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Option Help",
+          "type": "object"
         }
       },
       "required": [
@@ -392,6 +404,15 @@
           },
           "title": "Claim Ids",
           "type": "array"
+        },
+        "role": {
+          "default": "answer",
+          "enum": [
+            "answer",
+            "context"
+          ],
+          "title": "Role",
+          "type": "string"
         }
       },
       "required": [
@@ -469,6 +490,11 @@
       },
       "title": "Document Hashes",
       "type": "object"
+    },
+    "instructions": {
+      "default": "",
+      "title": "Instructions",
+      "type": "string"
     },
     "fields": {
       "items": {

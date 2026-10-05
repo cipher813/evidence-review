@@ -173,3 +173,46 @@ small {
 .no-original {
   font-style: italic;
 }
+
+/* Guided review: one current item with its statement, decision and next step. */
+.item {
+  margin: 0.2rem 0;
+}
+.item-link {
+  display: block;
+  width: 100%;
+  text-align: left;
+}
+.item.answered .item-link::before {
+  content: "✓ ";
+}
+.item.current {
+  border: 2px solid #1f5f99;
+  border-radius: 6px;
+  padding: 0.5rem;
+  background: #f4f9ff;
+}
+.item-text {
+  font-size: 1.05em;
+  border-left: 4px solid #1f5f99;
+  margin: 0.3rem 0;
+  padding-left: 0.6rem;
+}
+.option-help dt {
+  font-weight: 700;
+}
+.option-help dd {
+  margin: 0 0 0.3rem 1rem;
+}
+.claim-choice {
+  display: block;
+}
+#context-box {
+  border: 1px solid #879bad;
+  background: #f3f5f7;
+  padding: 0.4rem 0.6rem;
+  margin-bottom: 0.6rem;
+}
+#instructions p {
+  margin: 0.2rem 0;
+}

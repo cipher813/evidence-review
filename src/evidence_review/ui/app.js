@@ -11,6 +11,7 @@ let bundle,
   queue = Promise.resolve(),
   selection = null,
   subject = null,
+  current = null,
   active = 0,
   conflicted = false,
   last = performance.now(),
@@ -94,14 +95,15 @@ function status() {
   const hook = state.hook;
   $("status").className = "";
   $("status").textContent =
-    `Saved locally · revision ${state.revision} · ${completed}/${bundle.form.length} fields answered`;
+    `Draft: Saved locally · revision ${state.revision} · ${completed}/${bundle.form.length} fields answered`;
   // Consumer backup/import status is never folded into the local save message.
   const submitted = state.last_submission
     ? `submitted revision ${state.last_submission}`
     : "not submitted";
   $("continuation").className = "hook-" + hook.status;
+  const delivery = { succeeded: "delivery verified", failed: "delivery failed", pending: "delivery pending", unknown: "delivery unknown: reconcile" }[hook.status] || hook.status;
   $("continuation").textContent = state.last_submission
-    ? `Continuation ${hook.status} · ${submitted}` +
+    ? `Continuation ${hook.status} (${delivery}) · ${submitted}` +
       (hook.identifier ? ` · receipt ${hook.identifier}` : "") +
       (hook.reason ? ` · ${hook.reason}` : "")
     : "Continuation not started · nothing submitted yet";
@@ -344,6 +346,7 @@ function cite(c) {
 }
 function showSubject(item, id) {
   subject = id;
+  if (id) followSubject(id);
   selection = null;
   logEvent("subject_opened", id || "");
   $("evidence").replaceChildren(el("h3", item.text));
@@ -445,7 +448,11 @@ function showSpan(span) {
 function renderReport() {
   const report = $("report");
   report.replaceChildren();
-  bundle.fields.forEach((f) => {
+  $("context").replaceChildren();
+  const context = bundle.fields.filter((f) => f.role === "context");
+  $("context-box").hidden = !context.length;
+  context.forEach((f) => $("context").append(el("h3", f.label), el("p", f.text)));
+  bundle.fields.filter((f) => f.role !== "context").forEach((f) => {
     report.append(el("h3", f.label));
     const p = el("div");
     p.className = "report-text";
@@ -490,106 +497,226 @@ function renderReport() {
     report.append(p);
   });
 }
-function renderForms() {
-  $("forms").replaceChildren();
-  bundle.form.forEach((f) => {
-    const div = el("div");
-    div.className = "field";
-    let control;
-    if (f.kind === "boolean" && !f.require_true) {
-      control = el("select");
-      control.append(
-        new Option("Choose…", ""),
-        new Option("Yes", "true"),
-        new Option("No", "false"),
-      );
-      const value = answers.judgments[f.field_id]?.value;
-      control.value = typeof value === "boolean" ? String(value) : "";
-    } else if (f.kind === "choice") {
-      control = el("select");
-      control.append(new Option("Choose…", ""));
-      f.options.forEach((v) => control.append(new Option(v, v)));
-      control.value = answers.judgments[f.field_id]?.value || "";
-    } else {
-      control = el("input");
-      control.type = f.kind === "boolean" ? "checkbox" : "text";
-      if (f.kind === "boolean")
-        control.checked = answers.judgments[f.field_id]?.value === true;
-      else control.value = answers.judgments[f.field_id]?.value || "";
+function subjectOf(f) {
+  return (
+    bundle.claims.find((c) => c.claim_id === f.subject_id) ||
+    bundle.references.find((r) => r.reference_id === f.subject_id) ||
+    null
+  );
+}
+function isReference(id) {
+  return bundle.references.some((r) => r.reference_id === id);
+}
+function answered(f) {
+  const j = answers.judgments[f.field_id];
+  if (!j) return false;
+  if (f.require_true) return j.value === true;
+  return f.kind === "text" ? String(j.value).trim() !== "" : j.value !== "";
+}
+function itemFields() {
+  return bundle.form.filter((f) => f.subject_id);
+}
+function short(text, n = 90) {
+  return text.length > n ? text.slice(0, n - 1) + "…" : text;
+}
+// Items in order, starting after the current one, wrapping round.
+function nextUnanswered() {
+  const items = itemFields();
+  const at = items.findIndex((f) => f.field_id === current);
+  for (let k = 1; k <= items.length; k++) {
+    const f = items[(at + k + items.length) % items.length];
+    if (!answered(f)) return f;
+  }
+  return null;
+}
+// Opening a statement from the report also makes its decision the current item.
+function followSubject(id) {
+  const f = itemFields().find((x) => x.subject_id === id);
+  if (f && f.field_id !== current) {
+    current = f.field_id;
+    renderForms();
+  }
+}
+function goTo(fieldId, focus = true) {
+  current = fieldId;
+  const f = bundle.form.find((x) => x.field_id === fieldId);
+  const item = f && subjectOf(f);
+  if (item) showSubject(item, f.subject_id);
+  renderForms();
+  if (focus) $("field-" + fieldId)?.focus();
+}
+function claimLinks(f, div) {
+  // Coverage may rest on several claims; show their text, not bare identifiers.
+  const box = el("fieldset");
+  box.append(el("legend", "Claims that address this item (choose all that apply)"));
+  bundle.claims.forEach((c) => {
+    const l = el("label");
+    l.className = "claim-choice";
+    const check = el("input");
+    check.type = "checkbox";
+    check.checked = (answers.judgments[f.field_id]?.claim_ids || []).includes(c.claim_id);
+    check.onchange = () => {
+      const j = judgment(f.field_id);
+      j.claim_ids = check.checked
+        ? [...new Set([...j.claim_ids, c.claim_id])]
+        : j.claim_ids.filter((id) => id !== c.claim_id);
+      save();
+    };
+    l.append(check, document.createTextNode(` ${c.claim_id}: ${short(c.text)}`));
+    box.append(l);
+  });
+  div.append(box);
+}
+function fieldControl(f, div) {
+  let control;
+  if (f.kind === "boolean" && !f.require_true) {
+    control = el("select");
+    control.append(new Option("Choose…", ""), new Option("Yes", "true"), new Option("No", "false"));
+    const value = answers.judgments[f.field_id]?.value;
+    control.value = typeof value === "boolean" ? String(value) : "";
+  } else if (f.kind === "choice") {
+    control = el("select");
+    control.append(new Option("Choose…", ""));
+    f.options.forEach((v) => control.append(new Option(v, v)));
+    control.value = answers.judgments[f.field_id]?.value || "";
+  } else {
+    control = el("input");
+    control.type = f.kind === "boolean" ? "checkbox" : "text";
+    if (f.kind === "boolean") control.checked = answers.judgments[f.field_id]?.value === true;
+    else control.value = answers.judgments[f.field_id]?.value || "";
+  }
+  if (f.help) div.append(el("p", f.help));
+  const meanings = Object.entries(f.option_help || {});
+  if (meanings.length) {
+    const dl = el("dl");
+    dl.className = "option-help";
+    meanings.forEach(([option, text]) => dl.append(el("dt", option), el("dd", text)));
+    div.append(dl);
+  }
+  const label = el("label", f.label + (f.required ? " *" : ""));
+  control.id = "field-" + f.field_id;
+  control.setAttribute("aria-label", f.label);
+  label.append(control);
+  div.append(label);
+  control[f.kind === "text" ? "oninput" : "onchange"] = () => {
+    const value =
+      f.kind === "boolean"
+        ? f.require_true
+          ? control.checked
+          : control.value === ""
+            ? ""
+            : control.value === "true"
+        : control.value;
+    if (value === "") delete answers.judgments[f.field_id];
+    else judgment(f.field_id).value = value;
+    save();
+    progress();
+  };
+  const note = el("textarea");
+  note.setAttribute("aria-label", "Explanation: " + f.label);
+  note.placeholder = f.note_required_unless.length
+    ? `Explanation (required unless ${f.note_required_unless.join(" or ")})`
+    : "Explanation (optional)";
+  note.value = answers.judgments[f.field_id]?.note || "";
+  note.oninput = () => {
+    judgment(f.field_id).note = note.value;
+    save();
+  };
+  div.append(note);
+  if (f.subject_id && isReference(f.subject_id)) claimLinks(f, div);
+  const attach = el("button", "Attach selected source passage");
+  attach.onclick = () => {
+    if (!selection) {
+      $("status").textContent = "Select a passage first: open a source and click its first and last line.";
+      return;
     }
-    const label = el("label", f.label + (f.required ? " *" : ""));
-    control.id = "field-" + f.field_id;
-    control.setAttribute("aria-label", f.label);
-    label.append(control);
-    div.append(label);
-    control[f.kind === "text" ? "oninput" : "onchange"] = () => {
-      const value =
-        f.kind === "boolean"
-          ? f.require_true
-            ? control.checked
-            : control.value === ""
-              ? ""
-              : control.value === "true"
-          : control.value;
-      if (value === "") delete answers.judgments[f.field_id];
-      else judgment(f.field_id).value = value;
-      save();
-    };
-    const note = el("textarea");
-    note.setAttribute("aria-label", "Explanation: " + f.label);
-    note.placeholder =
-      "Explanation (required for uncertainty/defects where specified)";
-    note.value = answers.judgments[f.field_id]?.note || "";
-    note.oninput = () => {
-      judgment(f.field_id).note = note.value;
-      save();
-    };
-    div.append(note);
-    const links = el("div");
-    bundle.claims.forEach((c) => {
-      const l = el("label");
-      const check = el("input");
-      check.type = "checkbox";
-      check.checked = (answers.judgments[f.field_id]?.claim_ids || []).includes(
-        c.claim_id,
-      );
-      check.onchange = () => {
-        const j = judgment(f.field_id);
-        j.claim_ids = check.checked
-          ? [...new Set([...j.claim_ids, c.claim_id])]
-          : j.claim_ids.filter((id) => id !== c.claim_id);
-        save();
-      };
-      l.append(check, document.createTextNode(" Link claim " + c.claim_id));
-      links.append(l);
-    });
-    div.append(links);
-    const attach = el("button", "Attach selected source passage");
-    attach.onclick = () => {
-      if (!selection) return;
-      judgment(f.field_id).selections.push(structuredClone(selection));
+    judgment(f.field_id).selections.push(structuredClone(selection));
+    renderForms();
+    save();
+  };
+  div.append(attach);
+  for (const [i, s] of (answers.judgments[f.field_id]?.selections || []).entries()) {
+    const line = el("p", `${s.source_id} L${s.start_line}–L${s.end_line}: ${s.excerpt}`);
+    const remove = el("button", "Remove passage");
+    remove.onclick = () => {
+      judgment(f.field_id).selections.splice(i, 1);
       renderForms();
       save();
     };
-    div.append(attach);
-    for (const [i, s] of (
-      answers.judgments[f.field_id]?.selections || []
-    ).entries()) {
-      const line = el(
-        "p",
-        `${s.source_id} L${s.start_line}–L${s.end_line}: ${s.excerpt}`,
+    line.append(remove);
+    div.append(line);
+  }
+}
+function progress() {
+  const required = bundle.form.filter((f) => f.required);
+  const done = required.filter(answered).length;
+  const items = itemFields();
+  const at = items.findIndex((f) => f.field_id === current);
+  const next = nextUnanswered();
+  $("progress").textContent =
+    `${done} of ${required.length} required answers given` +
+    (at >= 0 ? ` · item ${at + 1} of ${items.length}` : "") +
+    (next ? ` · next unanswered: ${next.label}` : items.length ? " · every item answered; finish below" : "");
+  const button = $("next-item");
+  if (button) button.disabled = !next;
+}
+function renderForms() {
+  const items = itemFields();
+  if (current === null || !items.some((f) => f.field_id === current))
+    current = (items.find((f) => !answered(f)) || items[0] || {}).field_id ?? null;
+  $("items").replaceChildren();
+  items.forEach((f, i) => {
+    const item = subjectOf(f);
+    const div = el("div");
+    div.className = "item" + (answered(f) ? " answered" : "");
+    if (f.field_id !== current) {
+      const open = el(
+        "button",
+        `${i + 1}. ${f.label} · ${answered(f) ? "answered" : "unanswered"}${item ? " · " + short(item.text, 70) : ""}`,
       );
-      const remove = el("button", "Remove passage");
-      remove.onclick = () => {
-        judgment(f.field_id).selections.splice(i, 1);
-        renderForms();
-        save();
-      };
-      line.append(remove);
-      div.append(line);
+      open.className = "item-link";
+      open.onclick = () => goTo(f.field_id);
+      div.append(open);
+      $("items").append(div);
+      return;
     }
-    $("forms").append(div);
+    div.classList.add("current");
+    div.setAttribute("aria-label", "Current item");
+    div.append(el("h3", `Item ${i + 1} of ${items.length}: ${f.label}`));
+    if (item) {
+      div.append(el("p", isReference(f.subject_id) ? "Reference item:" : "Statement under review:"));
+      const quote = el("blockquote", item.text);
+      quote.className = "item-text";
+      div.append(quote);
+      div.append(el("small", "Its evidence is shown in the Evidence pane."));
+    }
+    fieldControl(f, div);
+    const nav = el("div");
+    nav.className = "item-nav";
+    const prev = el("button", "Previous item");
+    prev.disabled = i === 0;
+    prev.onclick = () => goTo(items[i - 1].field_id);
+    const next = el("button", "Next unanswered item");
+    next.id = "next-item";
+    next.onclick = () => {
+      const target = nextUnanswered();
+      if (target) goTo(target.field_id);
+      else $("field-" + (bundle.form.find((x) => !x.subject_id) || {}).field_id)?.focus();
+    };
+    nav.append(prev, next, el("small", " Keys: n next unanswered, p previous."));
+    div.append(nav);
+    $("items").append(div);
   });
+  $("forms").replaceChildren();
+  bundle.form
+    .filter((f) => !f.subject_id)
+    .forEach((f) => {
+      const div = el("div");
+      div.className = "field";
+      fieldControl(f, div);
+      $("forms").append(div);
+    });
+  progress();
 }
 function renderDefects() {
   $("defects").replaceChildren();
@@ -641,7 +768,7 @@ function renderDefects() {
             : d[key].filter((id) => id !== item[label]);
           save();
         };
-        l.append(c, document.createTextNode(" " + item[label]));
+        l.append(c, document.createTextNode(` ${item[label]}: ${short(item.text)}`));
         div.append(l);
       });
     const attach = el("button", "Attach passage to defect");
@@ -670,6 +797,11 @@ function renderDefects() {
 }
 function render() {
   $("task").textContent = bundle.bundle_id + " · " + bundle.task_kind;
+  $("instructions").replaceChildren();
+  if (bundle.instructions) {
+    $("instructions").append(el("h2", "What to do"));
+    bundle.instructions.split("\n").filter(Boolean).forEach((t) => $("instructions").append(el("p", t)));
+  }
   renderReport();
   const inv = evidence.inventory;
   if (inv) {
@@ -684,6 +816,8 @@ function render() {
     );
   }
   renderForms();
+  const first = bundle.form.find((f) => f.field_id === current);
+  if (first && subjectOf(first)) showSubject(subjectOf(first), first.subject_id);
   renderDefects();
   $("subjects").replaceChildren();
   [...bundle.claims, ...bundle.references].forEach((c) => {
@@ -766,6 +900,7 @@ $("next").onclick = async () => {
   $("amendment").value = "";
   selection = null;
   subject = null;
+  current = null;
   $("evidence").replaceChildren();
   await load();
 };
@@ -792,6 +927,14 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "/" && !typing) {
     event.preventDefault();
     $("search").focus();
+  } else if ((event.key === "n" || event.key === "p") && !typing && !event.metaKey && !event.ctrlKey) {
+    const items = itemFields();
+    const at = items.findIndex((f) => f.field_id === current);
+    const target = event.key === "n" ? nextUnanswered() : items[at - 1];
+    if (target) {
+      event.preventDefault();
+      goTo(target.field_id);
+    }
   } else if (event.key === "Escape" && selection) {
     selection = null;
     $("status").textContent = "Passage selection cleared.";
