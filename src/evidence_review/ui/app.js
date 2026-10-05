@@ -658,7 +658,7 @@ function progress() {
     (at >= 0 ? ` · item ${at + 1} of ${items.length}` : "") +
     (next ? ` · next unanswered: ${next.label}` : items.length ? " · every item answered; finish below" : "");
   const button = $("next-item");
-  if (button) button.disabled = !next;
+  if (button) button.textContent = next ? "Next unanswered item" : "Go to finish";
 }
 function renderForms() {
   const items = itemFields();
