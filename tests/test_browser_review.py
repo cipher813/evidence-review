@@ -1,0 +1,162 @@
+"""Real Chromium: evidence context, conflict recovery, keyboard use and blinding."""
+
+import json
+from playwright.sync_api import sync_playwright, expect
+from evidence_review import FileStore, open_review
+from evidence_review.contracts import FormField, digest
+from evidence_review.example import example_bundle
+from synthetic import TABLE, build, margin_claim, source, unavailable
+
+SUPPORT = "Does the evidence support the margin claim?"
+CHOICES = ["supported", "partially supported", "unsupported", "contradicted", "cannot determine"]
+
+
+def margin_bundle(prior=None, text=TABLE):
+    return build(
+        [
+            ("summary", "Operating margin rose 180 bps to 24.6%.", ["margin"]),
+            ("qualifications", "Revenue figures exclude 1 disposed segment.", []),
+        ],
+        [margin_claim(prior)],
+        {("summary", "180 bps"): ("derived", ["margin"]), ("summary", "24.6%"): ("cited", ["margin"])},
+        sources=[source(text)],
+        form=[
+            FormField(field_id="support:margin", label=SUPPORT, options=CHOICES, subject_id="margin", note_required_unless=["supported"]),
+            FormField(field_id="report_complete", label="I reviewed the full report.", kind="boolean", require_true=True),
+        ],
+    )
+
+
+def launch(pw):
+    return pw.chromium.launch()
+
+
+def test_operand_context_and_missing_prior_stay_unresolved(tmp_path):
+    with open_review(margin_bundle(unavailable()), FileStore(tmp_path), launch=False) as h, sync_playwright() as pw:
+        page = launch(pw).new_page()
+        page.goto(h.url)
+        expect(page.locator("#status")).to_contain_text("Saved locally")
+        report = page.get_by_role("region", name="Report")
+        expect(report).to_contain_text("subjects with unresolved evidence: margin")
+        page.get_by_role("button", name="180 bps, derived", exact=True).click()
+        evidence = page.get_by_role("region", name="Evidence")
+        expect(evidence).to_contain_text("L4 (table header): | Metric | FY2025 | FY2026 |")
+        expect(evidence).to_contain_text("L6 (cited): | Operating margin | 22.8% | 24.6% |")
+        expect(evidence).to_contain_text("L8 (note): (1) Revenue restated")
+        expect(evidence).to_contain_text("Recomputed (Decimal): 180.0 · arithmetic match")
+        expect(evidence).to_contain_text("Input evidence unresolved: no located citation for prior.")
+        expect(evidence).to_contain_text("unavailable: operand not found in frozen sources")
+        expect(evidence).to_contain_text("do not establish that the claim is supported")
+        # Unmapped prose number is reachable and explicitly unresolved.
+        page.get_by_role("button", name="1, uncited", exact=True).click()
+        expect(evidence).to_contain_text("1: uncited")
+        expect(page.get_by_label(SUPPORT, exact=True)).to_have_value("")
+
+
+def test_stale_tab_offers_explicit_recovery_without_overwrite(tmp_path):
+    b = margin_bundle()
+    store = FileStore(tmp_path)
+    with open_review(b, store, launch=False) as h, sync_playwright() as pw:
+        browser = launch(pw)
+        first, second = browser.new_page(), browser.new_page()
+        for page in (first, second):
+            page.goto(h.url)
+            expect(page.locator("#status")).to_contain_text("revision 0")
+            page.get_by_label("Assessor", exact=True).fill("Synthetic reviewer")
+        first.get_by_label(SUPPORT, exact=True).select_option("supported")
+        expect(first.locator("#status")).to_contain_text("revision 1")
+        second.get_by_label(SUPPORT, exact=True).select_option("unsupported")
+        conflict = second.get_by_role("alert")
+        expect(conflict).to_contain_text("Nothing is overwritten until you choose")
+        expect(conflict).to_contain_text("Differs from saved: " + SUPPORT)
+        assert store.load_task(b.bundle_id)["answers"]["judgments"]["support:margin"]["value"] == "supported"
+        second.get_by_role("button", name="Keep this tab's answers as a new revision").click()
+        expect(second.locator("#status")).to_contain_text("revision 2")
+        expect(conflict).to_be_hidden()
+        assert store.load_task(b.bundle_id)["answers"]["judgments"]["support:margin"]["value"] == "unsupported"
+        first.get_by_label("Explanation: " + SUPPORT, exact=True).fill("first tab note")
+        expect(first.get_by_role("alert")).to_be_visible()
+        first.get_by_role("button", name="Use saved version").click()
+        expect(first.get_by_label(SUPPORT, exact=True)).to_have_value("unsupported")
+        expect(first.locator("#status")).to_contain_text("revision 2")
+        assert len([e for e in (tmp_path / b.bundle_id / "events.jsonl").read_text().splitlines() if '"answer_saved"' in e]) == 2
+        browser.close()
+
+
+def test_keyboard_only_review_and_narrow_zoom(tmp_path):
+    with open_review(margin_bundle(), FileStore(tmp_path), launch=False) as h, sync_playwright() as pw:
+        browser = launch(pw)
+        page = browser.new_page(viewport={"width": 640, "height": 900})
+        page.goto(h.url)
+        expect(page.locator("#status")).to_contain_text("Saved locally")
+        page.keyboard.press("Tab")
+        assert page.evaluate("document.activeElement.id") == "assessor"
+        page.keyboard.type("Keyboard reviewer")
+        number = page.get_by_role("button", name="180 bps, derived", exact=True)
+        for _ in range(10):
+            page.keyboard.press("Tab")
+            if page.evaluate("document.activeElement.getAttribute('aria-label')") == "180 bps, derived":
+                break
+        else:
+            raise AssertionError("number button not reachable by Tab")
+        assert number.evaluate("n => getComputedStyle(n).outlineStyle") == "solid"
+        page.keyboard.press("Enter")
+        expect(page.get_by_role("region", name="Evidence")).to_contain_text("Formula: (current - prior) * 100")
+        page.locator("body").click(position={"x": 1, "y": 1})
+        page.keyboard.press("/")
+        assert page.evaluate("document.activeElement.id") == "search"
+        page.keyboard.type("restated")
+        line = page.get_by_role("button", name="Synthetic filing L8: (1) Revenue restated for a disposed segment.")
+        line.focus()
+        page.keyboard.press("Enter")
+        source_line = page.get_by_role("button", name="L8: (1) Revenue restated for a disposed segment.", exact=True)
+        expect(source_line).to_have_attribute("aria-pressed", "true")
+        select = page.get_by_label(SUPPORT, exact=True)
+        select.focus()
+        select.select_option("supported")  # native select via keyboard focus
+        expect(page.locator("#status")).to_contain_text("revision 1")
+        # 200% zoom equivalent: single column and no horizontal page scroll.
+        assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
+        # Status is conveyed by text and shape, not colour alone.
+        assert page.get_by_role("button", name="1, uncited", exact=True).evaluate(
+            "n => getComputedStyle(n, '::after').content"
+        ) == '" ?"'
+        browser.close()
+
+
+def test_independent_browser_traffic_carries_no_blinded_marker(tmp_path):
+    markers = ["arm-secret-7", "judge-verdict-clean", "synthetic-model-x"]
+    hostile = TABLE + "<script>window.pwned=1</script><img src=x onerror=\"window.pwned=2\">\n"
+    b = margin_bundle(text=hostile)
+    seen = []
+    with open_review(b, FileStore(tmp_path), launch=False, blind_markers=markers) as h, sync_playwright() as pw:
+        browser = launch(pw)
+        page = browser.new_page()
+
+        def capture(response):
+            try:
+                seen.append(response.text())
+            except Exception:
+                pass
+
+        page.on("response", capture)
+        page.goto(h.url)
+        expect(page.locator("#status")).to_contain_text("Saved locally")
+        assert "token" not in page.url
+        page.get_by_label("Assessor", exact=True).fill("Synthetic reviewer")
+        page.get_by_label(SUPPORT, exact=True).select_option("supported")
+        page.get_by_label("I reviewed the full report.", exact=True).check()
+        expect(page.locator("#status")).to_contain_text("revision 2")
+        page.get_by_label("Search frozen sources (press /)").fill("script")
+        page.get_by_role("button", name="Synthetic filing L11", exact=False).first.click()
+        page.get_by_role("button", name="Submit review", exact=True).click()
+        expect(page.locator("#continuation")).to_contain_text("Continuation succeeded")
+        assert page.evaluate("window.pwned") is None
+        seen.append(page.content())
+        seen.append(json.dumps(page.evaluate("[location.href, history.length, document.title]")))
+        browser.close()
+    blob = "\n".join(seen).casefold()
+    assert len(seen) > 8
+    assert not [m for m in markers if m in blob]
+    # Negative control: the same detector finds a marker that is present.
+    assert "window.pwned" in blob

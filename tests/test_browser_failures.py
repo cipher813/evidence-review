@@ -45,39 +45,39 @@ def test_browser_pending_hook_defect_and_injection(tmp_path):
         browser = pw.chromium.launch()
         page = browser.new_page()
         page.goto(h.url)
-        expect(page.get_by_role("status")).to_contain_text("Saved locally")
+        expect(page.locator("#status")).to_contain_text("Saved locally")
         assert page.evaluate("window.evidenceInjected") is None
         page.get_by_label("Assessor", exact=True).fill("Synthetic reviewer")
         page.get_by_label(
             "Does the evidence support the margin claim?", exact=True
         ).select_option("supported")
-        expect(page.get_by_role("status")).to_contain_text("revision 1")
+        expect(page.locator("#status")).to_contain_text("revision 1")
         page.get_by_role("button", name="Add defect", exact=True).click()
-        expect(page.get_by_role("status")).to_contain_text("revision 2")
+        expect(page.locator("#status")).to_contain_text("revision 2")
         page.get_by_label("Defect category", exact=True).fill("unsupported_conclusion")
         page.get_by_label("Defect category", exact=True).press("Tab")
-        expect(page.get_by_role("status")).to_contain_text("revision 3")
+        expect(page.locator("#status")).to_contain_text("revision 3")
         page.get_by_label("Defect materiality", exact=True).select_option("true")
-        expect(page.get_by_role("status")).to_contain_text("revision 4")
+        expect(page.locator("#status")).to_contain_text("revision 4")
         page.get_by_label("Defect evidence explanation", exact=True).fill(
             "Synthetic uncited forecast has no support."
         )
         page.get_by_label("Defect evidence explanation", exact=True).press("Tab")
-        expect(page.get_by_role("status")).to_contain_text("revision 5")
+        expect(page.locator("#status")).to_contain_text("revision 5")
         page.get_by_label(
             "I reviewed the full report and recorded all identified material defects.",
             exact=True,
         ).check()
-        expect(page.get_by_role("status")).to_contain_text("revision 6")
+        expect(page.locator("#status")).to_contain_text("revision 6")
         page.get_by_role("button", name="Submit review", exact=True).click()
-        expect(page.get_by_role("status")).to_contain_text("synthetic backup failure")
+        expect(page.locator("#continuation")).to_contain_text("synthetic backup failure")
         expect(
             page.get_by_role("button", name="Next task", exact=True)
         ).to_be_disabled()
         page.reload()
-        expect(page.get_by_role("status")).to_contain_text("synthetic backup failure")
+        expect(page.locator("#continuation")).to_contain_text("synthetic backup failure")
         page.get_by_role("button", name="Reconcile continuation", exact=True).click()
-        expect(page.get_by_role("status")).to_contain_text("reconciled")
+        expect(page.locator("#continuation")).to_contain_text("reconciled")
         expect(page.get_by_role("button", name="Next task", exact=True)).to_be_enabled()
         browser.close()
 
@@ -91,21 +91,21 @@ def test_missing_required_answer_can_be_corrected_without_reload(tmp_path):
         browser = pw.chromium.launch()
         page = browser.new_page()
         page.goto(h.url)
-        expect(page.get_by_role("status")).to_contain_text("Saved locally")
+        expect(page.locator("#status")).to_contain_text("Saved locally")
         page.get_by_label("Assessor", exact=True).fill("Synthetic reviewer")
         page.get_by_role("button", name="Submit review", exact=True).click()
-        expect(page.get_by_role("status")).to_contain_text("required field")
+        expect(page.locator("#status")).to_contain_text("required field")
         page.get_by_label(
             "Does the evidence support the margin claim?", exact=True
         ).select_option("supported")
-        expect(page.get_by_role("status")).to_contain_text("revision 1")
+        expect(page.locator("#status")).to_contain_text("revision 1")
         page.get_by_label(
             "I reviewed the full report and recorded all identified material defects.",
             exact=True,
         ).check()
-        expect(page.get_by_role("status")).to_contain_text("revision 2")
+        expect(page.locator("#status")).to_contain_text("revision 2")
         page.get_by_role("button", name="Submit review", exact=True).click()
-        expect(page.get_by_role("status")).to_contain_text("continuation succeeded")
+        expect(page.locator("#continuation")).to_contain_text("Continuation succeeded")
         browser.close()
 
 
@@ -123,10 +123,10 @@ def test_typing_without_blur_saves_notes_and_text_fields(tmp_path):
         browser = pw.chromium.launch()
         page = browser.new_page()
         page.goto(h.url)
-        expect(page.get_by_role("status")).to_contain_text("Saved locally")
+        expect(page.locator("#status")).to_contain_text("Saved locally")
         page.get_by_label("Assessor", exact=True).fill("Synthetic")
         page.get_by_label("Review reason", exact=True).fill("Unblurred decision")
-        expect(page.get_by_role("status")).to_contain_text("revision 1")
+        expect(page.locator("#status")).to_contain_text("revision 1")
         page.reload()
         expect(page.get_by_label("Review reason", exact=True)).to_have_value(
             "Unblurred decision"
@@ -134,7 +134,7 @@ def test_typing_without_blur_saves_notes_and_text_fields(tmp_path):
         page.get_by_label(
             "Explanation: Does the evidence support the margin claim?", exact=True
         ).fill("Unblurred explanation")
-        expect(page.get_by_role("status")).to_contain_text("revision 2")
+        expect(page.locator("#status")).to_contain_text("revision 2")
         page.reload()
         expect(
             page.get_by_label(

@@ -6,8 +6,10 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import re
 import tempfile
 import tomllib
+import urllib.request
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -55,6 +57,96 @@ def verify_wheel(root, wheel):
                 raise ValueError("schema drift")
 
 
+def requirement_hashes(text):
+    """Map each exported requirement to its allowed SHA-256 set."""
+    out = {}
+    current = None
+    for line in text.splitlines():
+        line = line.strip()
+        match = re.match(r"^([A-Za-z0-9_.-]+)==([^\s;\\]+)", line)
+        if match:
+            current = (canonical(match[1]), match[2])
+            out[current] = set()
+        for value in re.findall(r"--hash=sha256:([0-9a-f]{64})", line):
+            if current is None:
+                raise ValueError("hash without requirement")
+            out[current].add(value)
+    if not out or any(not hashes for hashes in out.values()):
+        raise ValueError("runtime requirements must all be hash-locked")
+    return out
+
+
+def canonical(name):
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def locked_wheels(lock):
+    data = tomllib.loads(lock)
+    return {
+        (canonical(p["name"]), p["version"]): p.get("wheels", [])
+        for p in data["package"]
+        if "version" in p
+    }
+
+
+def fetch(url):
+    with urllib.request.urlopen(url, timeout=60) as response:
+        return response.read()
+
+
+def stage_wheelhouse(lock, requirements, dest, download=fetch, tags=None):
+    """Download every locked runtime wheel while networking is explicit.
+
+    Each byte stream must match both the lock and the exported requirement
+    hash before it enters the wheelhouse, so a later offline install depends
+    on nothing but these files.
+    """
+    from packaging.tags import sys_tags
+    from packaging.utils import parse_wheel_filename
+
+    ranked = {tag: rank for rank, tag in enumerate(tags or sys_tags())}
+    wheels = locked_wheels(lock)
+    dest.mkdir(parents=True, exist_ok=True)
+    manifest = []
+    for (name, version), allowed in sorted(requirement_hashes(requirements).items()):
+        candidates = []
+        for wheel in wheels.get((name, version), []):
+            filename = wheel["url"].rsplit("/", 1)[-1]
+            supported = [ranked[t] for t in parse_wheel_filename(filename)[3] if t in ranked]
+            if supported:
+                candidates.append((min(supported), filename, wheel))
+        if not candidates:
+            raise ValueError(f"no locked compatible wheel: {name}=={version}")
+        _, filename, wheel = min(candidates, key=lambda c: c[0])
+        expected = wheel["hash"].removeprefix("sha256:")
+        if expected not in allowed:
+            raise ValueError(f"lock and requirements disagree: {name}")
+        data = download(wheel["url"])
+        if hashlib.sha256(data).hexdigest() != expected:
+            raise ValueError(f"hash mismatch: {filename}")
+        (dest / filename).write_bytes(data)
+        manifest.append({"name": name, "version": version, "file": filename, "sha256": expected})
+    return manifest
+
+
+def verify_wheelhouse(requirements, dest):
+    """Refuse an incomplete or altered wheelhouse before installation."""
+    from packaging.utils import parse_wheel_filename
+
+    present = {}
+    for path in dest.glob("*.whl"):
+        name, version = parse_wheel_filename(path.name)[:2]
+        present.setdefault((canonical(name), str(version)), []).append(path)
+    for key, allowed in requirement_hashes(requirements).items():
+        files = present.pop(key, [])
+        if len(files) != 1:
+            raise ValueError(f"incomplete wheelhouse: {key[0]}=={key[1]}")
+        if digest(files[0]) not in allowed:
+            raise ValueError(f"hash mismatch: {files[0].name}")
+    if present:
+        raise ValueError("undeclared wheel in wheelhouse")
+
+
 def build(root, out):
     subprocess.run(
         [
@@ -76,15 +168,21 @@ def build(root, out):
     return wheels[0]
 
 
+def reproducible_wheel(root, out, builder=None):
+    builder = builder or build
+    first = builder(root, out / "first")
+    second = builder(root, out / "second")
+    if digest(first) != digest(second):
+        raise ValueError("wheel is not reproducible")
+    return first
+
+
 def main():
     artifact = ROOT / "artifacts"
     artifact.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory() as task_tmp:
         task_tmp = Path(task_tmp)
-        first = build(ROOT, task_tmp / "first")
-        second = build(ROOT, task_tmp / "second")
-        if digest(first) != digest(second):
-            raise ValueError("wheel is not reproducible")
+        first = reproducible_wheel(ROOT, task_tmp)
         verify_wheel(ROOT, first)
         task_venv = task_tmp / "clean"
         subprocess.run(
@@ -108,12 +206,24 @@ def main():
             check=True,
             stdout=subprocess.DEVNULL,
         )
+        wheelhouse = task_tmp / "wheelhouse"
+        requirements = runtime.read_text()
+        manifest = stage_wheelhouse(
+            (ROOT / "uv.lock").read_text(), requirements, wheelhouse
+        )
+        verify_wheelhouse(requirements, wheelhouse)
+        (artifact / "wheelhouse.json").write_text(json.dumps(manifest, indent=2) + "\n")
+        # A fresh cache proves installation depends only on the verified wheelhouse.
+        offline = dict(os.environ, UV_CACHE_DIR=str(task_tmp / "empty-cache"))
         subprocess.run(
             [
                 "uv",
                 "pip",
                 "install",
                 "--offline",
+                "--no-index",
+                "--find-links",
+                str(wheelhouse),
                 "--require-hashes",
                 "--python",
                 str(python),
@@ -121,6 +231,7 @@ def main():
                 str(runtime),
             ],
             check=True,
+            env=offline,
         )
         subprocess.run(
             [
@@ -128,12 +239,14 @@ def main():
                 "pip",
                 "install",
                 "--offline",
+                "--no-index",
                 "--no-deps",
                 "--python",
                 str(python),
                 str(first),
             ],
             check=True,
+            env=offline,
         )
         smoke = """from importlib.resources import files
 from evidence_review import validate_bundle, open_review

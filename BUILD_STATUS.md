@@ -1,25 +1,22 @@
 # Implementation register
 
-Plan: IMPLEMENTATION_PLAN.md. Baseline: documentation only, main 9a798cd.
+Current release candidate: 0.2.0. Earlier bootstrap plan: [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Hardening and release process: [HARDENING.md](HARDENING.md).
 
 | Requirement | State | Verification |
 |---|---|---|
-| Versioned contracts; complete numeric inventory; source/locator integrity; Decimal math | verified locally | tests/test_contracts.py, observed missing implementation |
-| Transactional durable storage, revisions, replay, concurrency, idempotency | verified locally | tests/test_store.py |
-| Loopback browser UI, evidence/form navigation, autosave, amendments, blinding/security | verified locally | tests/test_server.py, tests/test_browser.py, tests/test_security.py |
-| Immutable submission hooks, durable outcomes, caller-owned continuation | verified locally | tests/test_hooks.py |
-| Locked packaging, schemas/assets/license, two consumers, clean install | verified locally | tests/test_packaging.py; clean noneditable wheel install, UI/schema/license inspected |
-| Offline browser rehearsal, action/timing evidence, public documentation | verified synthetic workflow; human timing not claimed | tests/test_browser.py, tests/test_browser_failures.py |
+| Versioned contracts (v1 unchanged in 0.2.0); complete numeric inventory including dates, ratios, multiples, accounting negatives and reference numerals; source/locator integrity; Decimal math | verified locally | tests/test_contracts.py, tests/test_evidence.py |
+| Evidence display: cited lines with paragraph, table header and table notes; each operand's own evidence; arithmetic separated from input-evidence status, unit and period warnings | verified locally | tests/test_evidence.py, tests/test_browser_review.py |
+| Transactional durable storage, revisions, replay, concurrency, idempotency, injected fsync/rename/write failures | verified locally | tests/test_store.py, tests/test_faults.py |
+| Stale tab and changed-bundle recovery without silent overwrite | verified locally | tests/test_browser_review.py, tests/test_store.py |
+| Loopback security, untrusted text, wrong/missing token, traversal variants, symlinks | verified locally | tests/test_server.py, tests/test_security.py |
+| Blinding: no disclosures in independent tasks; caller blind markers refuse bundles and withhold responses; browser traffic, page and history checked | verified locally | tests/test_security.py, tests/test_browser_review.py |
+| Keyboard-only flow, accessible names carrying number state, visible focus, non-colour markers, narrow viewport | verified locally in Chromium; assistive-technology check not yet performed by a person | tests/test_browser_review.py |
+| Hooks: immutable submissions, pending/failed/unknown outcomes, timeout without replay, late results never overwrite newer revisions | verified locally | tests/test_hooks.py, tests/test_faults.py |
+| Navigation counts recorded as exposure, never verification | verified locally | tests/test_faults.py |
+| Locked packaging; clean install from hash-verified wheelhouse with empty cache; wheelhouse faults and second-build mismatch fail before publish | verified locally | tests/test_delivery.py; `UV_CACHE_DIR="$(mktemp -d)" bash scripts/check.sh` |
+| Independent second consumer using only exported API, no research or provider imports | verified locally | tests/test_consumer_contract.py |
 
 Ruling: generic form fields carry caller-required decisions; no inference of semantic truth.
 Ruling: no hosted service or registry upload; exact tested commit/wheel is the consumer pin.
 
-Verification: 24 tests passed on Python 3.12/macOS; whole-package Python coverage 87%. Clean wheel import/schema/UI/license checks passed. No workflow or model calls. Browser timings are automated tests, not measured human effort.
-
-Final wheel built twice with identical SHA-256: 4bb2735471cbb1bd605703df1ac33b6960ce0737a406e7dc863a9b5cc5201987. Clean noneditable wheel install and CLI help verified.
-
-Fresh whole-branch review findings closed with regression tests: on-input text saving; explicit negative boolean decisions versus truth-required acknowledgement; count/date classification; metadata and tolerance display. All public fixtures remain artificial.
-
-Superseded by owner-authorized organizational transfer and repository hardening: HARDENING.md records the hosted quality gate, measured badges, security and verified release pipeline. Local evidence remains separate from hosted CI until the hardening PR passes.
-
-Hardening local verification: 41 tests; whole-source Python coverage 690/761 statements (90.670%, floor90.67), including delivery scripts. Identical wheel builds and isolated install pass; locked runtime dependency audit reports no known vulnerabilities. Hosted CI and required quality protection remain separately verified before handoff.
+Local verification for 0.2.0 (Linux, Python 3.12, uv 0.9.5, empty package cache): full suite green; whole-source Python coverage above the 92.0 floor; two identical wheel builds; clean isolated install from the staged wheelhouse. Hosted CI results are recorded on the pull request and release, not here. Browser timings are automated tests, not measured human effort; no human usability study has been run.
