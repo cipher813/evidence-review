@@ -102,6 +102,8 @@ def test_wheel_integrity_rejects_changed_license_or_schema(tmp_path):
         "upload-failure",
         "stale",
         "wrong-tag",
+        "no-tag",
+        "ref-error",
     ],
 )
 def test_publisher_only_creates_on_true_absence(tmp_path, failure):
@@ -146,10 +148,19 @@ if a[0]=="api" and "/releases/tags/" in a[1]:
     if mode in ("existing","stale"): print(json.dumps({"draft":False,"target_commitish":sha,"body":"Changes"}))
     elif mode in ("draft","upload-failure") or Path("created").exists(): print(json.dumps({"draft":True,"target_commitish":sha,"body":"Changes"}))
     else:
-        code="HTTP 404" if mode=="wrong-tag" else mode
+        code="HTTP 404" if mode in ("wrong-tag","no-tag","ref-error") else mode
         print("gh: failed ("+code+")",file=sys.stderr); sys.exit(1)
 elif a[0]=="api" and "/commits/v" in a[1]:
-    print("c"*40 if mode=="wrong-tag" else sha)
+    # Real GitHub answers 422, never 404, for a commit lookup by a missing tag.
+    print("gh: No commit found (HTTP 422)",file=sys.stderr); sys.exit(1)
+elif a[0]=="api" and "/git/ref/tags/" in a[1]:
+    if mode=="ref-error":
+        print("gh: Server Error (HTTP 500)",file=sys.stderr); sys.exit(1)
+    if mode=="no-tag" and not Path("tagged").exists():
+        print("gh: Not Found (HTTP 404)",file=sys.stderr); sys.exit(1)
+    print("commit "+("c"*40 if mode=="wrong-tag" else sha))
+elif a[:3]==["api","--method","POST"] and a[3].endswith("/git/refs"):
+    Path("tagged").touch()
 elif a[:2]==["release","create"]:
     Path("created").touch()
 elif a[:2]==["release","upload"] and mode=="upload-failure":
@@ -188,16 +199,18 @@ else: print("b"*40)
     if failure in ("HTTP 503", "HTTP 401"):
         assert result.returncode != 0
         assert len(calls) == 1 and not creates
-    elif failure in ("upload-failure", "wrong-tag"):
+    elif failure in ("upload-failure", "wrong-tag", "ref-error"):
         assert result.returncode != 0
         assert not any(call[:2] == ["release", "edit"] for call in calls)
         assert not creates
     else:
         assert result.returncode == 0, result.stderr
-        assert bool(creates) == (failure == "HTTP 404")
+        assert bool(creates) == (failure in ("HTTP 404", "no-tag"))
+        tagged = any(c[:3] == ["api", "--method", "POST"] and c[3].endswith("/git/refs") for c in calls)
+        assert tagged == (failure == "no-tag")
         if creates:
             assert "--draft" in creates[0]
-        if failure in ("HTTP 404", "draft"):
+        if failure in ("HTTP 404", "draft", "no-tag"):
             upload = next(
                 n for n, c in enumerate(calls) if c[:2] == ["release", "upload"]
             )
