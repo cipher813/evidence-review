@@ -67,3 +67,35 @@ def test_independent_payload_has_no_private_storage_or_disclosures(tmp_path):
         assert not data["disclosures"]
         assert str(tmp_path) not in json.dumps(data)
         assert not any(k in data for k in ["identity", "judge", "model", "arm"])
+
+
+def test_source_links_are_validated_and_served_beside_the_bundle(tmp_path):
+    b = example_bundle()
+    sid = b.sources[0].source_id
+    for bad in (
+        {sid: {"url": "http://example.com/doc"}},
+        {sid: {"url": "javascript:alert(1)"}},
+        {sid: {"url": "https://example.com/doc#frag"}},
+        {sid: {"url": "https://example.com/doc", "extra": "x"}},
+        {sid: "https://example.com/doc"},
+        {sid: {"url": "https://example.com/doc", "line_url": "https://example.com/doc#L1"}},
+        {sid: {"url": "https://example.com/doc", "line_url": "http://example.com/doc#L{start}"}},
+        {sid: {"url": "https://example.com/doc", "line_url": "https://example.com/doc#L{start}-{bad}"}},
+    ):
+        with pytest.raises(ValueError):
+            open_review(b, FileStore(tmp_path / "bad"), launch=False, source_links=bad)
+    links = {
+        sid: {
+            "url": "https://github.com/o/r/blob/abc/doc.md?plain=1",
+            "line_url": "https://github.com/o/r/blob/abc/doc.md?plain=1#L{start}-L{end}",
+            "label": "Open in source repo",
+            "note": "same bytes",
+        },
+        "not-in-bundle": {"url": "https://example.com/other"},
+    }
+    with open_review(b, FileStore(tmp_path), launch=False, source_links=links) as h:
+        with request(h, "/api/evidence") as r:
+            served = json.load(r)["links"]
+        with request(h, "/api/bundle") as r:
+            assert "github.com" not in r.read().decode()
+    assert served == {sid: links[sid]}

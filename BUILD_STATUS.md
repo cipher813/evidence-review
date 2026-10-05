@@ -1,6 +1,6 @@
 # Implementation register
 
-Published: 0.2.1 ([release](https://github.com/nousergon/evidence-review/releases/tag/v0.2.1), tag commit 5c34d3f51d67f71b8b0c47b23f6a1a9f8fee4fa1, wheel sha256 abe7f81239489661edbaace03acffa68dd1adc5e2fcf2b14648f5ab6e653fed3). 0.2.0 was never published: its release step failed on a draft lookup, fixed in 0.2.1 with no package change. Current release candidate: 0.2.2 (atomic continuation-attempt claims and fenced late results, issue #12). Earlier bootstrap plan: [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Hardening and release process: [HARDENING.md](HARDENING.md).
+Published: 0.2.1 ([release](https://github.com/nousergon/evidence-review/releases/tag/v0.2.1), tag commit 5c34d3f51d67f71b8b0c47b23f6a1a9f8fee4fa1, wheel sha256 abe7f81239489661edbaace03acffa68dd1adc5e2fcf2b14648f5ab6e653fed3). 0.2.0 was never published: its release step failed on a draft lookup, fixed in 0.2.1 with no package change. 0.2.2: atomic continuation-attempt claims and fenced late results (issue #12). Current release candidate: 0.2.3 (citations link to the public original at the cited lines; unresolved numbers prefill the frozen-source search). Earlier bootstrap plan: [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Hardening and release process: [HARDENING.md](HARDENING.md).
 
 | Requirement | State | Verification |
 |---|---|---|

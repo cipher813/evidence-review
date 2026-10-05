@@ -154,3 +154,9 @@ small {
     max-height: none;
   }
 }
+.original-link {
+  font-weight: 600;
+}
+.no-original {
+  font-style: italic;
+}

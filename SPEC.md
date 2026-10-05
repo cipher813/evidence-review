@@ -1,6 +1,6 @@
 # Evidence Review design
 
-Status: implemented in 0.2.0 (released as 0.2.1); 0.2.2 adds atomic continuation-attempt claims. Local-first reusable Python package and browser app. Operating guidance: [docs/OPERATIONS.md](docs/OPERATIONS.md).
+Status: implemented in 0.2.0 (released as 0.2.1); 0.2.2 adds atomic continuation-attempt claims; 0.2.3 adds optional links from frozen sources to their public originals (`open_review(..., source_links=...)`), opened at the cited lines when the original has line anchors. Local-first reusable Python package and browser app. Operating guidance: [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
 ## Purpose
 An outside user can inspect a report against provided evidence and record human judgments without copying identifiers, locating source files or editing JSON. The application automates evidence assembly, navigation, metadata, autosave, revisions and export. It does not determine factual truth on behalf of the human.
