@@ -46,7 +46,7 @@ wheels = [
 
 [[package]]
 name = "evidence-review"
-version = "0.1.0"
+version = "0.2.1"
 source = { editable = "." }
 dependencies = [
     { name = "pydantic" },
@@ -54,6 +54,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "packaging" },
     { name = "playwright" },
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -64,6 +65,7 @@ requires-dist = [{ name = "pydantic", specifier = "==2.13.5" }]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "packaging", specifier = "==26.3" },
     { name = "playwright", specifier = "==1.63.0" },
     { name = "pytest", specifier = "==9.1.1" },
     { name = "pytest-cov", specifier = "==7.1.0" },

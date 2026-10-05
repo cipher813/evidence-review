@@ -29,7 +29,7 @@ def test_config_preserves_whole_source_floor_and_no_omits():
     cfg = tomllib.loads((ROOT / "pyproject.toml").read_text())["tool"]["coverage"]
     assert cfg["run"]["source"] == ["src/evidence_review", "scripts"]
     assert not cfg["run"].get("omit") and not cfg["report"].get("omit")
-    assert cfg["report"]["fail_under"] >= 90.67
+    assert cfg["report"]["fail_under"] >= 92.0
 
 
 def test_badges_reject_missing_measurement_and_bind_source():
@@ -102,6 +102,9 @@ def test_wheel_integrity_rejects_changed_license_or_schema(tmp_path):
         "upload-failure",
         "stale",
         "wrong-tag",
+        "no-tag",
+        "ref-error",
+        "duplicate",
     ],
 )
 def test_publisher_only_creates_on_true_absence(tmp_path, failure):
@@ -143,15 +146,31 @@ with Path("calls").open("a") as f: f.write(json.dumps(a)+"\\n")
 mode=os.environ["TEST_FAILURE"]
 sha=os.environ["GITHUB_SHA"]
 if a[0]=="api" and "/releases/tags/" in a[1]:
+    # Real GitHub never returns a draft here, so this lookup cannot find one.
     if mode in ("existing","stale"): print(json.dumps({"draft":False,"target_commitish":sha,"body":"Changes"}))
-    elif mode in ("draft","upload-failure") or Path("created").exists(): print(json.dumps({"draft":True,"target_commitish":sha,"body":"Changes"}))
-    else:
-        code="HTTP 404" if mode=="wrong-tag" else mode
-        print("gh: failed ("+code+")",file=sys.stderr); sys.exit(1)
+    else: print("gh: Not Found (HTTP 404)",file=sys.stderr); sys.exit(1)
+elif a[0]=="api" and "/releases?" in a[1]:
+    draft={"tag_name":"v0.1.0","draft":True,"target_commitish":sha,"body":"Changes"}
+    if mode in ("HTTP 503","HTTP 401"):
+        print("gh: failed ("+mode+")",file=sys.stderr); sys.exit(1)
+    elif mode in ("existing","stale"): print(json.dumps(dict(draft,draft=False)))
+    # A freshly created draft is not listed yet, as on GitHub right after creation.
+    elif mode in ("draft","upload-failure"): print(json.dumps(draft))
+    elif mode=="duplicate":
+        print(json.dumps(draft)); print(json.dumps(draft))
 elif a[0]=="api" and "/commits/v" in a[1]:
-    print("c"*40 if mode=="wrong-tag" else sha)
-elif a[:2]==["release","create"]:
-    Path("created").touch()
+    # Real GitHub answers 422, never 404, for a commit lookup by a missing tag.
+    print("gh: No commit found (HTTP 422)",file=sys.stderr); sys.exit(1)
+elif a[0]=="api" and "/git/ref/tags/" in a[1]:
+    if mode=="ref-error":
+        print("gh: Server Error (HTTP 500)",file=sys.stderr); sys.exit(1)
+    if mode=="no-tag" and not Path("tagged").exists():
+        print("gh: Not Found (HTTP 404)",file=sys.stderr); sys.exit(1)
+    print("commit "+("c"*40 if mode=="wrong-tag" else sha))
+elif a[:3]==["api","--method","POST"] and a[3].endswith("/git/refs"):
+    Path("tagged").touch()
+elif a[:3]==["api","--method","POST"] and a[3].endswith("/releases"):
+    print(json.dumps({"tag_name":"v0.1.0","draft":True,"target_commitish":sha,"body":"Changes"}))
 elif a[:2]==["release","upload"] and mode=="upload-failure":
     print("interrupted upload",file=sys.stderr); sys.exit(1)
 elif a[:2]==["release","download"]:
@@ -184,20 +203,26 @@ else: print("b"*40)
         text=True,
     )
     calls = [json.loads(line) for line in (tmp_path / "calls").read_text().splitlines()]
-    creates = [call for call in calls if call[:2] == ["release", "create"]]
-    if failure in ("HTTP 503", "HTTP 401"):
+    creates = [
+        call
+        for call in calls
+        if call[:3] == ["api", "--method", "POST"] and call[3].endswith("/releases")
+    ]
+    if failure in ("HTTP 503", "HTTP 401", "duplicate"):
         assert result.returncode != 0
         assert len(calls) == 1 and not creates
-    elif failure in ("upload-failure", "wrong-tag"):
+    elif failure in ("upload-failure", "wrong-tag", "ref-error"):
         assert result.returncode != 0
         assert not any(call[:2] == ["release", "edit"] for call in calls)
         assert not creates
     else:
         assert result.returncode == 0, result.stderr
-        assert bool(creates) == (failure == "HTTP 404")
+        assert bool(creates) == (failure in ("HTTP 404", "no-tag"))
+        tagged = any(c[:3] == ["api", "--method", "POST"] and c[3].endswith("/git/refs") for c in calls)
+        assert tagged == (failure == "no-tag")
         if creates:
-            assert "--draft" in creates[0]
-        if failure in ("HTTP 404", "draft"):
+            assert "draft=true" in creates[0]
+        if failure in ("HTTP 404", "draft", "no-tag"):
             upload = next(
                 n for n, c in enumerate(calls) if c[:2] == ["release", "upload"]
             )
@@ -208,6 +233,11 @@ else: print("b"*40)
                 n for n, c in enumerate(calls) if c[:2] == ["release", "edit"]
             )
             assert upload < download < publish
+            assert {
+                "artifacts/coverage.json",
+                "artifacts/dependency-audit.json",
+                "artifacts/wheelhouse.json",
+            } <= set(calls[upload])
         if failure == "stale":
             assert not (artifact / "badge-tree.json").exists()
         else:
@@ -276,10 +306,114 @@ def test_isolated_distribution_uses_locked_runtime_and_build_hashes():
     script = (ROOT / "scripts/verify_distribution.py").read_text()
     assert '"--require-hashes"' in script and '"build-requirements.txt"' in script
     assert '"--no-deps"' in script and '"--frozen"' in script
+    # Installation must not depend on a resolver cache or a package index.
+    assert script.count('"--no-index"') == 2 and "UV_CACHE_DIR" in script
     assert "hatchling==1.29.0" in (ROOT / "build-requirements.txt").read_text()
 
 
 def test_build_constraints_match_project_backend_requirement():
     cfg = tomllib.loads((ROOT / "pyproject.toml").read_text())
     assert (ROOT / "build-requirements.in").read_text().splitlines() == cfg["build-system"]["requires"]
-    assert "uv lock --check --offline" in (ROOT / "scripts/check.sh").read_text()
+    assert "uv lock --check\n" in (ROOT / "scripts/check.sh").read_text()
+
+
+def _locked_pair(tmp_path):
+    import hashlib
+
+    good = b"synthetic wheel bytes"
+    sha = hashlib.sha256(good).hexdigest()
+    lock = f"""
+version = 1
+[[package]]
+name = "demo-dep"
+version = "1.0"
+wheels = [
+  {{ url = "https://files.invalid/demo_dep-1.0-py3-none-any.whl", hash = "sha256:{sha}" }},
+  {{ url = "https://files.invalid/demo_dep-1.0-cp99-cp99-plan9_x.whl", hash = "sha256:{'0' * 64}" }},
+]
+"""
+    requirements = f"demo-dep==1.0 \\\n    --hash=sha256:{sha} \\\n    --hash=sha256:{'0' * 64}\n"
+    return lock, requirements, good, sha
+
+
+def test_wheelhouse_is_staged_from_lock_and_verified(tmp_path):
+    from packaging.tags import Tag
+    from scripts.verify_distribution import stage_wheelhouse, verify_wheelhouse
+
+    lock, requirements, good, sha = _locked_pair(tmp_path)
+    fetched = []
+    tags = [Tag("py3", "none", "any")]
+
+    def download(url):
+        fetched.append(url)
+        return good
+
+    house = tmp_path / "house"
+    manifest = stage_wheelhouse(lock, requirements, house, download, tags)
+    assert manifest == [
+        {"name": "demo-dep", "version": "1.0", "file": "demo_dep-1.0-py3-none-any.whl", "sha256": sha}
+    ]
+    assert fetched == ["https://files.invalid/demo_dep-1.0-py3-none-any.whl"]
+    verify_wheelhouse(requirements, house)
+
+
+@pytest.mark.parametrize("fault", ["hash", "missing", "incomplete", "undeclared", "unlocked", "disagree"])
+def test_wheelhouse_faults_fail_before_install(tmp_path, fault):
+    from packaging.tags import Tag
+    from scripts.verify_distribution import stage_wheelhouse, verify_wheelhouse
+
+    lock, requirements, good, sha = _locked_pair(tmp_path)
+    tags = [Tag("py3", "none", "any")]
+    house = tmp_path / "house"
+    if fault == "hash":
+        with pytest.raises(ValueError, match="hash mismatch"):
+            stage_wheelhouse(lock, requirements, house, lambda url: b"tampered", tags)
+        assert not list(house.glob("*.whl"))
+        return
+    if fault == "missing":
+        with pytest.raises(ValueError, match="no locked compatible wheel"):
+            stage_wheelhouse(lock, requirements, house, lambda url: good, [Tag("cp1", "none", "x")])
+        return
+    if fault == "unlocked":
+        with pytest.raises(ValueError, match="hash-locked"):
+            stage_wheelhouse(lock, "demo-dep==1.0\n", house, lambda url: good, tags)
+        return
+    if fault == "disagree":
+        other = requirements.replace(sha, "1" * 64)
+        with pytest.raises(ValueError, match="disagree"):
+            stage_wheelhouse(lock, other, house, lambda url: good, tags)
+        return
+    stage_wheelhouse(lock, requirements, house, lambda url: good, tags)
+    if fault == "incomplete":
+        next(house.glob("*.whl")).unlink()
+        match = "incomplete"
+    else:
+        (house / "extra-2.0-py3-none-any.whl").write_bytes(b"x")
+        match = "undeclared"
+    with pytest.raises(ValueError, match=match):
+        verify_wheelhouse(requirements, house)
+
+
+def test_wheelhouse_rejects_altered_staged_bytes(tmp_path):
+    from packaging.tags import Tag
+    from scripts.verify_distribution import stage_wheelhouse, verify_wheelhouse
+
+    lock, requirements, good, sha = _locked_pair(tmp_path)
+    house = tmp_path / "house"
+    stage_wheelhouse(lock, requirements, house, lambda url: good, [Tag("py3", "none", "any")])
+    next(house.glob("*.whl")).write_bytes(b"changed after staging")
+    with pytest.raises(ValueError, match="hash mismatch"):
+        verify_wheelhouse(requirements, house)
+
+
+def test_second_build_mismatch_fails_before_publish(tmp_path):
+    from scripts.verify_distribution import reproducible_wheel
+
+    def builder(root, out):
+        out.mkdir(parents=True)
+        wheel = out / "pkg-1.0-py3-none-any.whl"
+        wheel.write_bytes(out.name.encode())
+        return wheel
+
+    with pytest.raises(ValueError, match="not reproducible"):
+        reproducible_wheel(tmp_path, tmp_path, builder)

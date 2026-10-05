@@ -5,20 +5,53 @@ import re
 from decimal import Decimal, InvalidOperation
 from .contracts import NumericSpan
 
+MONTH = r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?"
+# Calendar dates are one occurrence, never split into separate numbers.
+DATE = (
+    r"\d{4}-\d{2}-\d{2}"
+    rf"|{MONTH}\s+\d{{1,2}}(?:st|nd|rd|th)?,?\s+\d{{4}}"
+    rf"|\d{{1,2}}(?:st|nd|rd|th)?\s+{MONTH},?\s+\d{{4}}"
+)
+VALUE = r"\d+(?:[,.]\d+)*"
+SCALE = r"%|percent(?:age points?)?\b|per\s+cent\b|pp\b|bps\b|basis\s+points?\b|trillion\b|billion\b|million\b|thousand\b|tn\b|bn\b|mn\b|[mbkx]\b"
 NUMBER = re.compile(
-    r"(?<!\d)(?:[$£€]\s*)?[+−-]?\d+(?:[,.]\d+)*(?:\s*[–-]\s*\d+(?:[,.]\d+)*)?(?:\s*(?:%|bps\b|basis points\b|billion\b|million\b|thousand\b|[mbk]\b))?",
+    rf"(?P<date>{DATE})"
+    rf"|(?P<ratio>(?<![\d.]){VALUE}:\d+(?![\d:]))"
+    rf"|(?P<amount>\((?:[$£€¥₹]\s*)?{VALUE}(?:\s*(?:{SCALE}))?\)"
+    rf"|(?<!\d)(?:[$£€¥₹]\s*)?[+−-]?(?:[$£€¥₹]\s*)?{VALUE}"
+    rf"(?:\s*[–-]\s*(?:[$£€¥₹]\s*)?{VALUE})?(?:\s*(?:{SCALE}))?)",
     re.I,
 )
+# Words that make the following numeral a reference, not a quantity.
+REFERENCE_WORDS = re.compile(
+    r"(?:item|note|section|page|exhibit|part|rule|form|appendix|footnote|figure)\s*$",
+    re.I,
+)
+
+
+def _identifier(path, text, m):
+    if m["date"]:
+        return True, "calendar date"
+    if path.endswith((".cutoff", ".period")):
+        return True, "date or period field"
+    value = m.group()
+    before, after = text[: m.start()], text[m.end() : m.end() + 2]
+    if value[0].isdigit() and before[-1:].isalpha():
+        return True, "attached to a label"
+    if value[0].isdigit() and re.match(r"-[A-Za-z]", after):
+        return True, "form or document designation"
+    if REFERENCE_WORDS.search(before[-12:]):
+        return True, "document reference"
+    if re.fullmatch(r"0\d+", value):
+        return True, "zero-padded code"
+    # Magnitude alone cannot distinguish years from economic counts.
+    return False, ""
 
 
 def numeric_spans(path, text):
     out = []
     for m in NUMBER.finditer(text):
-        prefix = text[max(0, m.start() - 3) : m.start()]
-        # Magnitude alone cannot distinguish years from economic counts.
-        identifier = bool(prefix and prefix[-1].isalpha()) or path.endswith(
-            (".cutoff", ".period")
-        )
+        identifier, reason = _identifier(path, text, m)
         out.append(
             NumericSpan(
                 span_id=f"{path}:{m.start()}:{m.end()}",
@@ -27,30 +60,70 @@ def numeric_spans(path, text):
                 end=m.end(),
                 text=m.group(),
                 state="identifier" if identifier else "uncited",
+                reason=reason,
             )
         )
     return out
 
 
-def passage(source, start, end, context=2):
+NOTE_LINE = re.compile(
+    r"^\s*(?:\*|†|‡|§|¹|²|³|\(\w{1,3}\)|\[\w{1,3}\]|\d{1,2}[.)]\s|(?:foot)?notes?\b|source\b|n/?m\b)",
+    re.I,
+)
+
+
+def _table(lines, i):
+    return lines[i - 1].lstrip().startswith("|")
+
+
+def passage(source, start, end, context=2, paragraph=8):
+    """Cited lines plus the paragraph, table header and table notes around them.
+
+    Roles are deterministic layout hints; header and note discovery is
+    heuristic, so the full source text is always returned as well.
+    """
     lines = source.text.splitlines()
     if start < 1 or end < start or end > len(lines):
         raise ValueError("citation line bounds invalid")
     lo, hi = max(1, start - context), min(len(lines), end + context)
-    headers = []
-    if lines[start - 1].lstrip().startswith("|"):
+    # Extend to the enclosing paragraph (blank-line bounded), within limits.
+    while lo > 1 and lines[lo - 2].strip() and start - lo < paragraph:
+        lo -= 1
+    while hi < len(lines) and lines[hi].strip() and hi - end < paragraph:
+        hi += 1
+    roles = {}
+    if _table(lines, start):
         top = start
-        while top > 1 and lines[top - 2].lstrip().startswith("|"):
+        while top > 1 and _table(lines, top - 1):
             top -= 1
-        headers = list(range(top, min(top + 2, start)))
-    indices = sorted(set(headers + list(range(lo, hi + 1))))
+        for i in range(top, min(top + 2, start)):
+            roles[i] = "table_header"
+        bottom = end
+        while bottom < len(lines) and _table(lines, bottom + 1):
+            bottom += 1
+        i = bottom + 1
+        while i <= len(lines) and i - bottom <= paragraph:
+            if NOTE_LINE.match(lines[i - 1]):
+                roles[i] = "note"
+            elif lines[i - 1].strip():
+                break
+            i += 1
+    for i in range(lo, hi + 1):
+        roles.setdefault(
+            i,
+            "cited"
+            if start <= i <= end
+            else ("note" if NOTE_LINE.match(lines[i - 1]) else "context"),
+        )
+    indices = sorted(roles)
     return {
         "text": "\n".join(lines[start - 1 : end]),
         "context": "\n".join(f"L{i}: {lines[i - 1]}" for i in indices),
+        "lines": [{"line": i, "text": lines[i - 1], "role": roles[i]} for i in indices],
         "full_text": source.text,
         "start_line": start,
         "end_line": end,
-        "table_header_is_heuristic": bool(headers),
+        "table_header_is_heuristic": "table_header" in roles.values(),
     }
 
 
@@ -70,6 +143,77 @@ def validate_citation(citation, sources):
         text.split()
     ):
         raise ValueError("located excerpt mismatch")
+
+
+def operand_evidence(operands, unit, conversions):
+    """Report what evidence exists for each input; never certify support."""
+    missing = [
+        o.name for o in operands if o.citation is None or o.citation.status != "located"
+    ]
+    units = sorted({o.unit for o in operands if o.unit})
+    warnings = []
+    if not conversions and len(units) > 1:
+        warnings.append("operands use different units without a declared conversion")
+    if any(not o.unit for o in operands):
+        warnings.append("operand unit unavailable")
+    if any(not o.period for o in operands):
+        warnings.append("operand period unavailable")
+    return {
+        "status": "operand_evidence_missing" if missing else "all_operands_cited",
+        "missing": missing,
+        "warnings": warnings,
+        "note": "Arithmetic and located inputs do not establish that the claim is supported.",
+    }
+
+
+def evidence_views(bundle):
+    """Context for every located citation, keyed source:start:end, for display."""
+    sources = {s.source_id: s for s in bundle.sources}
+    views = {}
+    for item in [*bundle.claims, *bundle.references]:
+        cites = list(item.citations)
+        if item.calculation:
+            cites += [o.citation for o in item.calculation.operands if o.citation]
+        for c in cites:
+            if c.status == "located":
+                key = f"{c.source_id}:{c.start_line}:{c.end_line}"
+                view = passage(sources[c.source_id], c.start_line, c.end_line)
+                view.pop("full_text")
+                views[key] = view
+    return views
+
+
+def inventory(bundle):
+    """Deterministic evidence counts; zero means not observed, not verified."""
+    spans = {}
+    for n in bundle.spans:
+        spans[n.state] = spans.get(n.state, 0) + 1
+    unresolved_claims = []
+    inaccessible = 0
+    failed = []
+    for item in [*bundle.claims, *bundle.references]:
+        ident = getattr(item, "claim_id", None) or item.reference_id
+        cites = list(item.citations)
+        if item.calculation:
+            cites += [o.citation for o in item.calculation.operands if o.citation]
+            r = item.calculation.recomputation
+            if r.get("status") != "match":
+                failed.append(ident)
+            if r.get("evidence", {}).get("status") != "all_operands_cited":
+                unresolved_claims.append(ident)
+        bad = [c for c in cites if c.status != "located"]
+        inaccessible += len(bad)
+        if (bad or not cites) and ident not in unresolved_claims:
+            unresolved_claims.append(ident)
+    return {
+        "spans_by_state": dict(sorted(spans.items())),
+        "span_total": len(bundle.spans),
+        "claims": len(bundle.claims),
+        "references": len(bundle.references),
+        "unresolved_subjects": sorted(unresolved_claims),
+        "unresolved_citations": inaccessible,
+        "calculations_not_matching": sorted(failed),
+    }
 
 
 def calculate(formula, values, reported, tolerance):

@@ -1,6 +1,6 @@
 # Evidence Review design
 
-Status: approved direction; implementation under review. Local-first reusable Python package and browser app.
+Status: implemented in 0.2.0 (released as 0.2.1). Local-first reusable Python package and browser app. Operating guidance: [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
 ## Purpose
 An outside user can inspect a report against provided evidence and record human judgments without copying identifiers, locating source files or editing JSON. The application automates evidence assembly, navigation, metadata, autosave, revisions and export. It does not determine factual truth on behalf of the human.
@@ -13,9 +13,9 @@ Versioned ReviewBundle contains bundle_id, document/content hashes, task kind, r
 
 ReviewSubmission contains bundle_id/hash, revision, assessor, UTC times, active/session time, explicit judgments, selected claim/source-span IDs, defects with category/materiality/evidence note, completion and provenance. Preserve every previous revision. The consumer defines assessment aggregation and its rubric, not the package.
 
-Package API: validate_bundle(data)->ReviewBundle; open_review(bundle, store, hooks)->ReviewHandle; export_submission(store, task_id, revision)->ReviewSubmission. CLI evidence-review demo runs entirely on artificial data; evidence-review serve --bundle PATH --state-dir PATH opens the loopback browser. HTTP state and callbacks are shared between CLI and library.
+Package API: validate_bundle(data)->ReviewBundle; open_review(bundle, store, hooks=None, **kwargs)->ReviewHandle (kwargs: launch, port, assessor, blind_markers); export_submission(store, task_id, revision)->ReviewSubmission; export_json(...) gives its canonical bytes; inventory(bundle) counts spans by state, unresolved subjects and citations and non-matching calculations. CLI evidence-review demo runs entirely on artificial data; evidence-review serve --bundle PATH --state-dir PATH opens the loopback browser; inspect and export print inventories and canonical submissions. HTTP state and callbacks are shared between CLI and library.
 
-Storage protocol has load_task, append_event, save_snapshot and save_submission with revision/idempotency checks. A filesystem implementation uses atomic writes, fsync and write-ahead replay; callers may supply another store. Hooks on_submission/on_revision receive immutable submissions and return workflow status: pending/succeeded/failed with recording identifier. Remote backup/provider/orchestrator behavior is caller-owned.
+Storage protocol has load_task, append_event, save_snapshot and save_submission with revision/idempotency checks. A filesystem implementation uses atomic writes, fsync and write-ahead replay; callers may supply another store. Hooks on_submission/on_revision receive immutable submissions and return workflow status: pending/succeeded/failed/unknown with recording identifier. A callback exceeding Hooks.timeout is recorded as unknown and never replayed; a late result is recorded only if no newer outcome exists. Remote backup/provider/orchestrator behavior is caller-owned.
 
 ## Human interface
 Report left, evidence right, judgment controls nearby. Click a number/claim to see exact cited lines, table headers/context/footnotes and full source. Calculations show formula, each input/unit/period/source, recomputation and discrepancy. Missing source/input is unresolved, never hidden. Support/coverage choices and verified defect/materiality remain explicit human input; identifiers/locators/timing/derived flags are automatic. No default clean/support verdict.

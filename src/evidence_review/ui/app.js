@@ -5,6 +5,7 @@ const token =
 if (token) sessionStorage.setItem("review-token", token);
 history.replaceState(null, "", location.pathname);
 let bundle,
+  evidence = { views: {}, inventory: null },
   state,
   answers,
   queue = Promise.resolve(),
@@ -42,9 +43,73 @@ function status() {
   const hook = state.hook;
   $("status").className = "";
   $("status").textContent =
-    `Saved locally · revision ${state.revision} · ${completed}/${bundle.form.length} fields answered · continuation ${hook.status}: ${hook.reason || ""}`;
+    `Saved locally · revision ${state.revision} · ${completed}/${bundle.form.length} fields answered`;
+  // Consumer backup/import status is never folded into the local save message.
+  const submitted = state.last_submission
+    ? `submitted revision ${state.last_submission}`
+    : "not submitted";
+  $("continuation").className = "hook-" + hook.status;
+  $("continuation").textContent = state.last_submission
+    ? `Continuation ${hook.status} · ${submitted}` +
+      (hook.identifier ? ` · receipt ${hook.identifier}` : "") +
+      (hook.reason ? ` · ${hook.reason}` : "")
+    : "Continuation not started · nothing submitted yet";
   $("next").disabled =
     state.last_submission !== state.revision || hook.status !== "succeeded";
+}
+function logEvent(kind, subject = "") {
+  // Navigation is recorded as exposure only; it never marks evidence verified.
+  api("/api/event", {
+    bundle_id: bundle.bundle_id,
+    bundle_hash: state.bundle_hash,
+    kind,
+    subject: String(subject).slice(0, 200),
+  }).catch(() => {});
+}
+function differences(mine, saved) {
+  const out = [];
+  const ids = new Set([
+    ...Object.keys(mine.judgments),
+    ...Object.keys(saved.judgments),
+  ]);
+  for (const id of ids)
+    if (
+      JSON.stringify(mine.judgments[id] || null) !==
+      JSON.stringify(saved.judgments[id] || null)
+    ) {
+      const field = bundle.form.find((f) => f.field_id === id);
+      out.push(field ? field.label : id);
+    }
+  if (JSON.stringify(mine.defects) !== JSON.stringify(saved.defects))
+    out.push("Defects");
+  return out;
+}
+async function showConflict(message) {
+  $("conflict").hidden = false;
+  $("conflict-message").textContent =
+    "Not saved: " +
+    message +
+    ". Another tab or process saved a newer revision. Nothing is overwritten until you choose.";
+  $("conflict-fields").replaceChildren();
+  let latest = null;
+  try {
+    latest = await api("/api/state");
+  } catch (_) {
+    /* the bundle itself may have changed */
+  }
+  const sameBundle = latest && latest.bundle_hash === state.bundle_hash;
+  $("keep-mine").hidden = !sameBundle;
+  if (!sameBundle) {
+    $("conflict-message").textContent =
+      "Not saved: the review task changed on disk. Load the saved version to continue.";
+    return;
+  }
+  const changed = differences(answers, latest.answers);
+  if (!changed.length)
+    $("conflict-fields").append(el("li", "No answer differs from the saved revision."));
+  changed.forEach((label) =>
+    $("conflict-fields").append(el("li", "Differs from saved: " + label)),
+  );
 }
 function account() {
   const current = performance.now();
@@ -92,7 +157,10 @@ function save(submit = false) {
         state = await api(submit ? "/api/submit" : "/api/save", body);
         status();
       } catch (err) {
-        if (err.status === 409) conflicted = true;
+        if (err.status === 409) {
+          conflicted = true;
+          showConflict(err.message);
+        }
         if (!err.status || err.status >= 500) {
           try {
             const restored = await api("/api/state");
@@ -130,6 +198,7 @@ function judgment(id) {
   );
 }
 function showSource(source, start = 1, end = start) {
+  logEvent("source_opened", source.source_id);
   const box = $("evidence");
   const title = el("h3", source.title);
   box.append(title);
@@ -145,7 +214,9 @@ function showSource(source, start = 1, end = start) {
     const n = el("button", `L${i + 1}: ${text}`);
     n.type = "button";
     n.className = "source-line";
-    if (i + 1 >= start && i + 1 <= end) n.classList.add("selected");
+    const picked = i + 1 >= start && i + 1 <= end;
+    n.classList.toggle("selected", picked);
+    n.setAttribute("aria-pressed", String(picked));
     n.onclick = () => {
       if (anchor === null) anchor = i + 1;
       else {
@@ -160,8 +231,12 @@ function showSource(source, start = 1, end = start) {
           subject_id: subject,
         };
         anchor = null;
-        for (const [j, line] of [...wrap.children].entries())
-          line.classList.toggle("selected", j + 1 >= lo && j + 1 <= hi);
+        for (const [j, line] of [...wrap.children].entries()) {
+          const on = j + 1 >= lo && j + 1 <= hi;
+          line.classList.toggle("selected", on);
+          line.setAttribute("aria-pressed", String(on));
+        }
+        logEvent("passage_selected", `${source.source_id}:${lo}:${hi}`);
         $("status").textContent =
           `Selected L${lo}–L${hi}. Attach to a judgment or defect.`;
       }
@@ -187,6 +262,24 @@ function cite(c) {
     ),
   );
   if (c.excerpt) box.append(el("blockquote", c.excerpt));
+  const view = evidence.views[`${c.source_id}:${c.start_line}:${c.end_line}`];
+  if (view) {
+    const ctx = el("div");
+    ctx.className = "context";
+    view.lines.forEach((row) => {
+      const label = { cited: "cited", table_header: "table header", note: "note" }[
+        row.role
+      ];
+      const line = el("div", `L${row.line}${label ? " (" + label + ")" : ""}: ${row.text}`);
+      line.className = "ctx " + row.role;
+      ctx.append(line);
+    });
+    box.append(ctx);
+    if (view.table_header_is_heuristic)
+      box.append(
+        el("small", "Table header detection is heuristic; open the full source to confirm."),
+      );
+  }
   const source = bundle.sources.find((s) => s.source_id === c.source_id);
   if (source) {
     const btn = el("button", "Open full frozen source");
@@ -198,34 +291,51 @@ function cite(c) {
 function showSubject(item, id) {
   subject = id;
   selection = null;
+  logEvent("subject_opened", id);
   $("evidence").replaceChildren(el("h3", item.text));
   (item.citations || []).forEach(cite);
   if (item.calculation) {
     const c = item.calculation;
-    $("evidence").append(
-      el("p", `Formula: ${c.formula} = ${c.result} ${c.unit}`),
+    const r = c.recomputation || { status: "unresolved" };
+    const box = $("evidence");
+    box.append(
+      el("h4", "Calculation"),
+      el("p", `Formula: ${c.formula}`),
+      el("p", `Reported result: ${c.result} ${c.unit}`),
       el("p", `Absolute tolerance: ${c.tolerance} ${c.unit}`),
     );
     c.operands.forEach((o) => {
-      $("evidence").append(
+      box.append(
         el(
           "p",
-          `Input ${o.name}: ${o.value} ${o.unit} · period ${o.period || "unavailable"}`,
+          `Input ${o.name}: ${o.value} ${o.unit || "(unit unavailable)"} · period ${o.period || "unavailable"}`,
         ),
       );
       if (o.citation) cite(o.citation);
-      else $("evidence").append(el("p", "Input source unavailable."));
+      else box.append(el("p", `Input ${o.name} source unavailable.`));
     });
-    (c.conversions || []).forEach((v) =>
-      $("evidence").append(el("p", "Conversion: " + v)),
-    );
-    $("evidence").append(
+    (c.conversions || []).forEach((v) => box.append(el("p", "Conversion: " + v)));
+    box.append(
       el(
         "p",
-        "Recomputation: " +
-          JSON.stringify(c.recomputation || { status: "unresolved" }),
+        r.status === "unresolved"
+          ? `Arithmetic unresolved: ${r.reason || "cannot recompute"}`
+          : `Recomputed (Decimal): ${r.result} · arithmetic ${r.status} · discrepancy ${r.discrepancy}`,
       ),
     );
+    const ev = r.evidence;
+    if (ev) {
+      box.append(
+        el(
+          "p",
+          ev.status === "all_operands_cited"
+            ? "Input evidence: every input has a located citation."
+            : `Input evidence unresolved: no located citation for ${ev.missing.join(", ")}.`,
+        ),
+      );
+      ev.warnings.forEach((w) => box.append(el("p", "Warning: " + w)));
+      box.append(el("p", ev.note));
+    }
   }
   if (!(item.citations || []).length && !item.calculation)
     $("evidence").append(
@@ -233,6 +343,7 @@ function showSubject(item, id) {
     );
 }
 function showSpan(span) {
+  logEvent("span_opened", span.span_id);
   const linked = span.claim_ids
     .map((id) => bundle.claims.find((c) => c.claim_id === id))
     .filter(Boolean);
@@ -273,8 +384,12 @@ function renderReport() {
         "number " +
         (["uncited", "ambiguous", "unavailable"].includes(s.state)
           ? "unresolved"
-          : "");
-      b.title = s.state;
+          : s.state === "identifier"
+            ? "identifier"
+            : "");
+      b.title = s.state + (s.reason ? ": " + s.reason : "");
+      // State is part of the accessible name, not conveyed by colour alone.
+      b.setAttribute("aria-label", `${s.text}, ${s.state}`);
       b.onclick = () => showSpan(s);
       p.append(b);
       offset = s.end;
@@ -464,6 +579,18 @@ function renderDefects() {
 function render() {
   $("task").textContent = bundle.bundle_id + " · " + bundle.task_kind;
   renderReport();
+  const inv = evidence.inventory;
+  if (inv) {
+    const states = Object.entries(inv.spans_by_state)
+      .map(([k, v]) => `${v} ${k}`)
+      .join(", ");
+    $("report").prepend(
+      el(
+        "p",
+        `Numbers: ${inv.span_total}${states ? " (" + states + ")" : ""} · subjects with unresolved evidence: ${inv.unresolved_subjects.length ? inv.unresolved_subjects.join(", ") : "none"}`,
+      ),
+    );
+  }
   renderForms();
   renderDefects();
   $("subjects").replaceChildren();
@@ -488,7 +615,10 @@ function render() {
 }
 async function load() {
   bundle = await api("/api/bundle");
+  evidence = await api("/api/evidence");
   state = await api("/api/state");
+  conflicted = false;
+  $("conflict").hidden = true;
   answers = structuredClone(state.answers);
   $("assessor").value =
     state.assessor ||
@@ -547,10 +677,41 @@ $("next").onclick = async () => {
   $("evidence").replaceChildren();
   await load();
 };
+$("use-saved").onclick = () => {
+  queue = queue.catch(() => {}).then(load);
+};
+$("keep-mine").onclick = () => {
+  queue = queue
+    .catch(() => {})
+    .then(async () => {
+      const latest = await api("/api/state");
+      if (latest.bundle_hash !== state.bundle_hash) return load();
+      // Explicit choice: this tab's answers become a new revision on top of the saved one.
+      state = latest;
+      conflicted = false;
+      $("conflict").hidden = true;
+    });
+  return queue.then(() => save());
+};
+document.addEventListener("keydown", (event) => {
+  const typing = ["INPUT", "TEXTAREA", "SELECT"].includes(
+    document.activeElement?.tagName,
+  );
+  if (event.key === "/" && !typing) {
+    event.preventDefault();
+    $("search").focus();
+  } else if (event.key === "Escape" && selection) {
+    selection = null;
+    $("status").textContent = "Passage selection cleared.";
+  }
+});
+let searchTimer = null;
 $("search").oninput = () => {
   const term = $("search").value.toLowerCase();
   $("search-results").replaceChildren();
+  clearTimeout(searchTimer);
   if (!term) return;
+  searchTimer = setTimeout(() => logEvent("search", ""), 800);
   bundle.sources.forEach((s) =>
     s.text.split("\n").forEach((line, i) => {
       if (line.toLowerCase().includes(term)) {

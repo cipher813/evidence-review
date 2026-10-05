@@ -5,7 +5,7 @@
 **Goal:** ship a reusable local review package and browser app before application-specific integration.
 **Architecture:** versioned bundle/submission contracts, generic filesystem store, callback hooks and one shared server/UI. No application imports or evaluation/provider logic.
 **Spec:** SPEC.md. **Stack:** Python 3.12, Pydantic with an exact tested lockfile pin, standard-library HTTP, vanilla browser assets.
-**Status:** plan only; no functioning application is claimed.
+**Status:** historical bootstrap plan. Implemented and released as described in [BUILD_STATUS.md](BUILD_STATUS.md); current contracts are in [SPEC.md](SPEC.md).
 
 ## Constraints
 Public files must have an external reader's purpose. Synthetic examples only. No real corpus, customer data, private prompts/rubrics, model routes or results. License: MIT, approved by the owner. Include LICENSE in source and wheel distributions and declare MIT in package metadata. No cloud deployment, account creation, paid services or model calls. Runtime dependencies and browser dev dependencies, if added, use tested pins and a lockfile. Keep repository checks minimal and substantive; no workflows at bootstrap, no schedules or cloud workers.

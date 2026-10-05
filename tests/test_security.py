@@ -87,3 +87,58 @@ def test_oversize_body_and_symlink_snapshot_refused(tmp_path):
         s.save_snapshot(b, 0, "save", answer(), "Ada")
     # WAL persisted before snapshot failure; authoritative recovery exposes it.
     assert s.load_task(b.bundle_id)["revision"] == 1
+
+
+def test_wrong_or_missing_token_and_traversal_variants(tmp_path):
+    from urllib.request import Request, urlopen as raw
+
+    b = example_bundle()
+    with open_review(b, FileStore(tmp_path), launch=False) as h:
+        for headers in ({}, {"Authorization": "Bearer wrong"}, {"Authorization": h.token}):
+            with pytest.raises(HTTPError) as e:
+                raw(Request(h.origin + "/api/state", headers=headers))
+            assert e.value.code == 403
+        for path in ("/%2e%2e/%2e%2e/etc/passwd", "/ui/../server.py", "//etc/passwd", "/app.js/../../store.py"):
+            with pytest.raises(HTTPError) as e:
+                request(h, path)
+            assert e.value.code in (403, 404)
+
+
+def test_symlinked_state_root_is_refused(tmp_path):
+    target = tmp_path / "real"
+    target.mkdir()
+    (tmp_path / "link").symlink_to(target, target_is_directory=True)
+    with pytest.raises(ValueError, match="symlink"):
+        FileStore(tmp_path / "link")
+
+
+def test_blinding_markers_refuse_bundle_and_withhold_responses(tmp_path):
+    from evidence_review.server import BlindingViolation
+
+    markers = ["arm-secret-7", "Judge-Verdict-Clean"]
+    leaked = example_bundle().model_dump(mode="json")
+    leaked["sources"][0]["metadata"]["producer"] = "ARM-SECRET-7"
+    with pytest.raises(BlindingViolation):
+        open_review(leaked, FileStore(tmp_path / "a"), launch=False, blind_markers=markers)
+    with pytest.raises(ValueError, match="3 characters"):
+        open_review(example_bundle(), FileStore(tmp_path / "b"), launch=False, blind_markers=["A"])
+
+    def leaky_backup(sub):
+        return {"status": "succeeded", "identifier": "branch/judge-verdict-clean", "reason": "ok"}
+
+    b = example_bundle()
+    with open_review(b, FileStore(tmp_path / "c"), Hooks(on_submission=leaky_backup), launch=False, blind_markers=markers) as h:
+        body = {"bundle_id": b.bundle_id, "bundle_hash": b.bundle_hash, "revision": 0, "key": "k", "answers": answer(), "assessor": "Ada"}
+        with pytest.raises(HTTPError) as e:
+            request(h, "/api/submit", "POST", body, Origin=h.origin)
+        assert e.value.code == 500
+        message = e.value.read().decode()
+        assert "blinding violation" in message and "judge" not in message.lower()
+
+
+def test_adjudication_may_show_declared_disclosures(tmp_path):
+    raw = example_bundle().model_dump(mode="json")
+    raw.update(task_kind="adjudication", disclosures={"Assessment A": "arm-secret-7 said supported"})
+    with open_review(raw, FileStore(tmp_path), launch=False, blind_markers=["arm-secret-7"]) as h:
+        with request(h, "/api/bundle") as r:
+            assert "arm-secret-7" in r.read().decode()

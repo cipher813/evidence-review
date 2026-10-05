@@ -2,11 +2,18 @@
 
 import argparse
 import json
+import sys
 import time
 from pathlib import Path
-from . import open_review, validate_bundle
+from . import export_json, inventory, open_review, validate_bundle
 from .example import example_bundle
 from .store import FileStore
+
+
+def read_bundle(parser, path):
+    if path.is_symlink() or not path.is_file() or path.stat().st_size > 20_000_000:
+        parser.error("bundle must be a regular file of at most 20 MB")
+    return validate_bundle(json.loads(path.read_text(encoding="utf-8")))
 
 
 def main(argv=None):
@@ -19,15 +26,31 @@ def main(argv=None):
     serve.add_argument("--state-dir", type=Path, required=True)
     for p in (demo, serve):
         p.add_argument("--no-browser", action="store_true")
+    inspect = sub.add_parser(
+        "inspect", help="validate a bundle and print its evidence inventory"
+    )
+    inspect.add_argument("--bundle", type=Path, required=True)
+    export = sub.add_parser(
+        "export", help="print one submitted revision as canonical JSON"
+    )
+    export.add_argument("--state-dir", type=Path, required=True)
+    export.add_argument("--task", required=True)
+    export.add_argument("--revision", type=int, required=True)
     args = parser.parse_args(argv)
+    if args.command == "inspect":
+        print(json.dumps(inventory(read_bundle(parser, args.bundle)), indent=2))
+        return 0
+    if args.command == "export":
+        if not (args.state_dir / args.task).is_dir():
+            parser.error("no such task in state directory")
+        try:
+            data = export_json(FileStore(args.state_dir), args.task, args.revision)
+        except KeyError:
+            parser.error(f"revision {args.revision} was not submitted")
+        sys.stdout.buffer.write(data + b"\n")
+        return 0
     if args.command == "serve":
-        if (
-            args.bundle.is_symlink()
-            or not args.bundle.is_file()
-            or args.bundle.stat().st_size > 20_000_000
-        ):
-            parser.error("bundle must be a regular file of at most 20 MB")
-        bundle = validate_bundle(json.loads(args.bundle.read_text(encoding="utf-8")))
+        bundle = read_bundle(parser, args.bundle)
     else:
         bundle = example_bundle()
     with open_review(

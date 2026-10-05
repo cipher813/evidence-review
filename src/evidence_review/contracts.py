@@ -9,6 +9,15 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
+PACKAGE_VERSION = "0.2.1"
+
+
+def canonical_json(value) -> bytes:
+    return json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
+    ).encode("utf-8")
+
+
 def digest(value) -> str:
     data = (
         value.encode("utf-8")
@@ -76,14 +85,18 @@ class Calculation(Strict):
 
     @model_validator(mode="after")
     def recompute(self):
-        from .evidence import calculate
+        from .evidence import calculate, operand_evidence
 
-        self.recomputation = calculate(
-            self.formula,
-            {o.name: o.value for o in self.operands},
-            self.result,
-            self.tolerance,
-        )
+        # Derived on every validation, so a producer cannot supply its own verdict.
+        self.recomputation = {
+            **calculate(
+                self.formula,
+                {o.name: o.value for o in self.operands},
+                self.result,
+                self.tolerance,
+            ),
+            "evidence": operand_evidence(self.operands, self.unit, self.conversions),
+        }
         return self
 
 
@@ -249,3 +262,19 @@ class ReviewSubmission(Strict):
 
 def validate_bundle(data) -> ReviewBundle:
     return ReviewBundle.model_validate(data)
+
+
+def blind_terms(terms):
+    """Normalize caller-declared identity/label markers that must never be shown."""
+    cleaned = sorted({str(t).strip().casefold() for t in terms if str(t).strip()})
+    if any(len(t) < 3 for t in cleaned):
+        raise ValueError("blinding markers need at least 3 characters to be meaningful")
+    return tuple(cleaned)
+
+
+def blind_violations(payload, terms):
+    """Markers present anywhere in a JSON-serializable payload (case-insensitive)."""
+    if not terms:
+        return []
+    text = json.dumps(payload, ensure_ascii=False).casefold()
+    return [t for t in terms if t in text]
