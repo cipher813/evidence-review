@@ -154,7 +154,8 @@ elif a[0]=="api" and "/releases?" in a[1]:
     if mode in ("HTTP 503","HTTP 401"):
         print("gh: failed ("+mode+")",file=sys.stderr); sys.exit(1)
     elif mode in ("existing","stale"): print(json.dumps(dict(draft,draft=False)))
-    elif mode in ("draft","upload-failure") or Path("created").exists(): print(json.dumps(draft))
+    # A freshly created draft is not listed yet, as on GitHub right after creation.
+    elif mode in ("draft","upload-failure"): print(json.dumps(draft))
     elif mode=="duplicate":
         print(json.dumps(draft)); print(json.dumps(draft))
 elif a[0]=="api" and "/commits/v" in a[1]:
@@ -168,8 +169,8 @@ elif a[0]=="api" and "/git/ref/tags/" in a[1]:
     print("commit "+("c"*40 if mode=="wrong-tag" else sha))
 elif a[:3]==["api","--method","POST"] and a[3].endswith("/git/refs"):
     Path("tagged").touch()
-elif a[:2]==["release","create"]:
-    Path("created").touch()
+elif a[:3]==["api","--method","POST"] and a[3].endswith("/releases"):
+    print(json.dumps({"tag_name":"v0.1.0","draft":True,"target_commitish":sha,"body":"Changes"}))
 elif a[:2]==["release","upload"] and mode=="upload-failure":
     print("interrupted upload",file=sys.stderr); sys.exit(1)
 elif a[:2]==["release","download"]:
@@ -202,7 +203,11 @@ else: print("b"*40)
         text=True,
     )
     calls = [json.loads(line) for line in (tmp_path / "calls").read_text().splitlines()]
-    creates = [call for call in calls if call[:2] == ["release", "create"]]
+    creates = [
+        call
+        for call in calls
+        if call[:3] == ["api", "--method", "POST"] and call[3].endswith("/releases")
+    ]
     if failure in ("HTTP 503", "HTTP 401", "duplicate"):
         assert result.returncode != 0
         assert len(calls) == 1 and not creates
@@ -216,7 +221,7 @@ else: print("b"*40)
         tagged = any(c[:3] == ["api", "--method", "POST"] and c[3].endswith("/git/refs") for c in calls)
         assert tagged == (failure == "no-tag")
         if creates:
-            assert "--draft" in creates[0]
+            assert "draft=true" in creates[0]
         if failure in ("HTTP 404", "draft", "no-tag"):
             upload = next(
                 n for n, c in enumerate(calls) if c[:2] == ["release", "upload"]

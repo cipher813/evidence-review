@@ -30,8 +30,9 @@ else
     exit 1
   fi
   gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$TAG" -f target_commitish="$GITHUB_SHA" --jq .body > artifacts/CHANGELOG.md
-  gh release create "$TAG" --draft --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "$TAG" --notes-file artifacts/CHANGELOG.md
-  find_release || { echo 'Created draft release not found' >&2; exit 1; }
+  # Keep the create response: the release listing lags a fresh draft, so a
+  # lookup straight after creating it can miss it.
+  gh api --method POST "repos/$GITHUB_REPOSITORY/releases" -f tag_name="$TAG" -f target_commitish="$GITHUB_SHA" -f name="$TAG" -F draft=true -F body=@artifacts/CHANGELOG.md > artifacts/release.json
   DRAFT=true
 fi
 if [ "$DRAFT" = true ]; then
