@@ -20,4 +20,6 @@ Final wheel built twice with identical SHA-256: 4bb2735471cbb1bd605703df1ac33b69
 
 Fresh whole-branch review findings closed with regression tests: on-input text saving; explicit negative boolean decisions versus truth-required acknowledgement; count/date classification; metadata and tolerance display. All public fixtures remain artificial.
 
-Ruling: local coverage gate and PR/issue templates complete repository delivery. Hosted CI is deferred to an external-contributor need, preserving the owner's minimal Actions preference; local evidence is not described as CI green.
+Superseded by owner-authorized organizational transfer and repository hardening: HARDENING.md records the hosted quality gate, measured badges, security and verified release pipeline. Local evidence remains separate from hosted CI until the hardening PR passes.
+
+Hardening local verification: 41 tests; whole-source Python coverage 690/761 statements (90.670%, floor90.67), including delivery scripts. Identical wheel builds and isolated install pass; locked runtime dependency audit reports no known vulnerabilities. Hosted CI and required quality protection remain separately verified before handoff.

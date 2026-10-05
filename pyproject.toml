@@ -18,3 +18,13 @@ packages = ["src/evidence_review"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+pythonpath = ["."]
+
+[tool.coverage.run]
+source = ["src/evidence_review", "scripts"]
+relative_files = true
+
+[tool.coverage.report]
+fail_under = 90.67
+show_missing = true
+precision = 2
