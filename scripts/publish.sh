@@ -15,8 +15,9 @@ else
     cat artifacts/release-error.txt >&2
     exit 1
   fi
-  if gh api "repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha > artifacts/tag-sha.txt 2> artifacts/tag-error.txt; then
-    [ "$(cat artifacts/tag-sha.txt)" = "$GITHUB_SHA" ] || { echo 'Version tag belongs to another source' >&2; exit 1; }
+  # The ref endpoint answers 404 for an absent tag; the commits endpoint answers 422.
+  if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object.type + " " + .object.sha' > artifacts/tag-sha.txt 2> artifacts/tag-error.txt; then
+    [ "$(cat artifacts/tag-sha.txt)" = "commit $GITHUB_SHA" ] || { echo 'Version tag belongs to another source' >&2; exit 1; }
   elif grep -q '(HTTP 404)' artifacts/tag-error.txt; then
     gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA" --silent
   else
@@ -31,8 +32,8 @@ fi
 if [ "$DRAFT" = true ]; then
   # An interrupted upload is recoverable, but only for the same source commit.
   python3 -c 'import json,os; from pathlib import Path; p=json.loads(Path("artifacts/release.json").read_text()); p["target_commitish"]==os.environ["GITHUB_SHA"] or (_ for _ in ()).throw(ValueError("draft belongs to another source; do not replace it")); Path("artifacts/CHANGELOG.md").write_text(p["body"]+"\n")'
-  TAG_SHA=$(gh api "repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha)
-  [ "$TAG_SHA" = "$GITHUB_SHA" ] || { echo 'Version tag changed' >&2; exit 1; }
+  TAG_SHA=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object.type + " " + .object.sha')
+  [ "$TAG_SHA" = "commit $GITHUB_SHA" ] || { echo 'Version tag changed' >&2; exit 1; }
   # Measurement provenance outlives the 14-day CI artifact.
   gh release upload "$TAG" artifacts/*.whl artifacts/SHA256SUMS artifacts/package-verification.json artifacts/CHANGELOG.md artifacts/coverage.json artifacts/dependency-audit.json artifacts/wheelhouse.json --repo "$GITHUB_REPOSITORY" --clobber
 fi
