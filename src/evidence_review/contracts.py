@@ -9,7 +9,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-PACKAGE_VERSION = "0.4.2"
+PACKAGE_VERSION = "0.4.3"
 
 
 def canonical_json(value) -> bytes:
@@ -343,7 +343,13 @@ class ReviewBundle(Strict):
 
     @property
     def bundle_hash(self):
-        return digest(self.model_dump(mode="json"))
+        payload = self.model_dump(mode="json")
+        # Absent optional diagnostics preserve pre-diagnostics durable identities.
+        # Supplied diagnostics remain hashed; all other legacy fields stay intact.
+        for span in payload["spans"]:
+            if span["diagnostics"] is None:
+                del span["diagnostics"]
+        return digest(payload)
 
 
 class Selection(Strict):

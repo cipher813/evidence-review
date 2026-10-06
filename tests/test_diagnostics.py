@@ -110,3 +110,36 @@ def test_diagnostics_participate_in_blinding(tmp_path):
     assert blind_violations(b.model_dump(),["original excerpt"])
     with pytest.raises(ValueError, match="blind"):
         open_review(b,FileStore(tmp_path),launch=False,blind_markers=["Original excerpt"])
+
+
+def test_v041_store_reopens_with_original_identity_answers_and_submission(tmp_path):
+    import json
+    import shutil
+    from pathlib import Path
+    fixture=Path(__file__).parent/"fixtures/diagnostic-free-v041"
+    payload=json.loads((fixture/"bundle.json").read_text())
+    assert all("diagnostics" not in span for span in payload["spans"])
+    bundle=ReviewBundle.model_validate(payload)
+    assert bundle.bundle_hash=="9dde844428f8f6114e9b8cb088aefa123f79e1ea1c637b228f2ab82f26092052"
+    shutil.copytree(fixture/"store",tmp_path/"store")
+    store=FileStore(tmp_path/"store")
+    before=store.load_task(bundle.bundle_id)
+    submitted=store.export_submission(bundle.bundle_id,1).model_dump(mode="json")
+    assert store.register(bundle)==before
+    assert store.export_submission(bundle.bundle_id,1).model_dump(mode="json")==submitted
+    assert submitted["judgments"]["support:margin"]["value"]=="supported"
+    # An old browser/API consumer explicitly including null is equivalent to omission.
+    for span in payload["spans"]: span["diagnostics"]=None
+    assert ReviewBundle.model_validate(payload).bundle_hash==bundle.bundle_hash
+    store.save_snapshot(bundle,1,"legacy-resume",before["answers"],"Synthetic legacy reviewer")
+    assert store.export_submission(bundle.bundle_id,1).model_dump(mode="json")==submitted
+
+
+def test_supplied_diagnostics_remain_part_of_store_identity(tmp_path):
+    from evidence_review import Conflict
+    bundle=diagnostic_bundle()
+    store=FileStore(tmp_path);store.register(bundle)
+    changed=bundle.model_copy(deep=True)
+    next(s for s in changed.spans if s.diagnostics).diagnostics.candidate[0].reason="Different mechanical evidence"
+    assert changed.bundle_hash != bundle.bundle_hash
+    with pytest.raises(Conflict,match="bundle or rubric changed"):store.register(changed)
