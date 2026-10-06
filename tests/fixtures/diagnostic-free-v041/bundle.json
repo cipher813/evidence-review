@@ -1,0 +1,277 @@
+{
+  "schema_version": "review-bundle/v1",
+  "bundle_id": "synthetic",
+  "task_kind": "independent",
+  "document_hashes": {
+    "report": "5a8b2595a3f3dc4c0bfbce9db3122b70c864895b3e96737d1a5920626f53d089"
+  },
+  "instructions": "",
+  "workload": null,
+  "fields": [
+    {
+      "path": "summary",
+      "label": "Summary",
+      "text": "Operating margin rose 180 bps to 24.6%.",
+      "claim_ids": [
+        "margin"
+      ],
+      "role": "answer"
+    },
+    {
+      "path": "qualifications",
+      "label": "Qualifications",
+      "text": "Revenue figures exclude 1 disposed segment.",
+      "claim_ids": [],
+      "role": "answer"
+    }
+  ],
+  "sources": [
+    {
+      "source_id": "filing",
+      "title": "Synthetic filing",
+      "text": "# Synthetic issuer results\nPrepared for testing only.\n\n| Metric | FY2025 | FY2026 |\n| --- | --- | --- |\n| Operating margin | 22.8% | 24.6% |\n| Revenue ($m) | 1,200 | 1,150 |\n(1) Revenue restated for a disposed segment.\n\nManagement expects demand to soften next year.\n",
+      "sha256": "d6fb96326cf75da5327eee9d2ab34cf8f61ffc6b78ab9c8b7497aa9437f6fff3",
+      "metadata": {}
+    }
+  ],
+  "spans": [
+    {
+      "span_id": "summary:22:29",
+      "field_path": "summary",
+      "start": 22,
+      "end": 29,
+      "text": "180 bps",
+      "state": "derived",
+      "claim_ids": [
+        "margin"
+      ],
+      "reason": "",
+      "citations": [],
+      "calculation": {
+        "formula": "(current - prior) * 100",
+        "operands": [
+          {
+            "name": "current",
+            "value": "24.6",
+            "unit": "pct",
+            "period": "FY2026",
+            "citation": {
+              "source_id": "filing",
+              "start_line": 6,
+              "end_line": 6,
+              "excerpt": "24.6%",
+              "status": "located",
+              "reason": ""
+            },
+            "kind": "source",
+            "entity": "",
+            "calculation": null
+          },
+          {
+            "name": "prior",
+            "value": "22.8",
+            "unit": "pct",
+            "period": "FY2025",
+            "citation": {
+              "source_id": "filing",
+              "start_line": 6,
+              "end_line": 6,
+              "excerpt": "22.8%",
+              "status": "located",
+              "reason": ""
+            },
+            "kind": "source",
+            "entity": "",
+            "calculation": null
+          }
+        ],
+        "result": "180",
+        "unit": "bps",
+        "tolerance": "0.01",
+        "conversions": [],
+        "recomputation": {
+          "status": "match",
+          "result": "180.0",
+          "discrepancy": "0.0",
+          "evidence_verified": false,
+          "evidence": {
+            "status": "all_operands_cited",
+            "missing": [],
+            "warnings": [],
+            "note": "Arithmetic and located inputs do not establish that the claim is supported."
+          },
+          "arithmetic": {
+            "status": "match",
+            "result": "180.0",
+            "discrepancy": "0.0",
+            "evidence_verified": false
+          }
+        }
+      },
+      "context": null,
+      "prepared_evidence": []
+    },
+    {
+      "span_id": "summary:33:38",
+      "field_path": "summary",
+      "start": 33,
+      "end": 38,
+      "text": "24.6%",
+      "state": "cited",
+      "claim_ids": [
+        "margin"
+      ],
+      "reason": "",
+      "citations": [
+        {
+          "source_id": "filing",
+          "start_line": 6,
+          "end_line": 6,
+          "excerpt": "24.6%",
+          "status": "located",
+          "reason": ""
+        }
+      ],
+      "calculation": null,
+      "context": null,
+      "prepared_evidence": []
+    },
+    {
+      "span_id": "qualifications:24:25",
+      "field_path": "qualifications",
+      "start": 24,
+      "end": 25,
+      "text": "1",
+      "state": "uncited",
+      "claim_ids": [],
+      "reason": "",
+      "citations": [],
+      "calculation": null,
+      "context": null,
+      "prepared_evidence": []
+    }
+  ],
+  "claims": [
+    {
+      "claim_id": "margin",
+      "text": "Operating margin rose 180 bps to 24.6%.",
+      "citations": [
+        {
+          "source_id": "filing",
+          "start_line": 6,
+          "end_line": 6,
+          "excerpt": "22.8%",
+          "status": "located",
+          "reason": ""
+        },
+        {
+          "source_id": "filing",
+          "start_line": 6,
+          "end_line": 6,
+          "excerpt": "24.6%",
+          "status": "located",
+          "reason": ""
+        }
+      ],
+      "calculation": {
+        "formula": "(current - prior) * 100",
+        "operands": [
+          {
+            "name": "current",
+            "value": "24.6",
+            "unit": "pct",
+            "period": "FY2026",
+            "citation": {
+              "source_id": "filing",
+              "start_line": 6,
+              "end_line": 6,
+              "excerpt": "24.6%",
+              "status": "located",
+              "reason": ""
+            },
+            "kind": "source",
+            "entity": "",
+            "calculation": null
+          },
+          {
+            "name": "prior",
+            "value": "22.8",
+            "unit": "pct",
+            "period": "FY2025",
+            "citation": {
+              "source_id": "filing",
+              "start_line": 6,
+              "end_line": 6,
+              "excerpt": "22.8%",
+              "status": "located",
+              "reason": ""
+            },
+            "kind": "source",
+            "entity": "",
+            "calculation": null
+          }
+        ],
+        "result": "180",
+        "unit": "bps",
+        "tolerance": "0.01",
+        "conversions": [],
+        "recomputation": {
+          "status": "match",
+          "result": "180.0",
+          "discrepancy": "0.0",
+          "evidence_verified": false,
+          "evidence": {
+            "status": "all_operands_cited",
+            "missing": [],
+            "warnings": [],
+            "note": "Arithmetic and located inputs do not establish that the claim is supported."
+          },
+          "arithmetic": {
+            "status": "match",
+            "result": "180.0",
+            "discrepancy": "0.0",
+            "evidence_verified": false
+          }
+        }
+      }
+    }
+  ],
+  "references": [],
+  "form": [
+    {
+      "field_id": "support:margin",
+      "label": "Does the evidence support the margin claim?",
+      "kind": "choice",
+      "options": [
+        "supported",
+        "partially supported",
+        "unsupported",
+        "contradicted",
+        "cannot determine"
+      ],
+      "required": true,
+      "require_true": false,
+      "subject_id": "margin",
+      "evidence_required": false,
+      "note_required_unless": [
+        "supported"
+      ],
+      "help": "",
+      "option_help": {}
+    },
+    {
+      "field_id": "report_complete",
+      "label": "I reviewed the full report.",
+      "kind": "boolean",
+      "options": [],
+      "required": true,
+      "require_true": true,
+      "subject_id": null,
+      "evidence_required": false,
+      "note_required_unless": [],
+      "help": "",
+      "option_help": {}
+    }
+  ],
+  "disclosures": {}
+}
