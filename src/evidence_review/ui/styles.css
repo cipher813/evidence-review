@@ -1,3 +1,4 @@
+*, *::before, *::after { box-sizing: border-box; }
 :root {
   font-family: system-ui, sans-serif;
   color: #172534;
@@ -20,7 +21,9 @@ h1 {
 }
 main {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  grid-template-rows: minmax(0, .35fr) minmax(0, .65fr);
+  grid-template-areas: "evidence evidence" "report judgments";
   flex: 1;
   min-height: 0;
   overflow: hidden;
@@ -166,11 +169,13 @@ small {
 }
 @media (max-width: 1000px) {
   main {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto;
+    grid-template-areas: "report" "judgments" "evidence";
   }
   body { height: auto; display: block; }
   main { overflow: visible; }
-  .review-pane { overflow: visible; }
+  .review-pane { overflow: visible; scrollbar-gutter: auto; }
 }
 .original-link {
   font-weight: 600;
@@ -242,4 +247,11 @@ header label { margin: .25rem 0; }
 .review-pane > h2 { margin-top: 0; }
 #item-navigation { margin-top: .7rem; }
 .claim-choice { padding: .25rem; background: #edf5ff; }
-@media (max-width: 1000px) { .review-pane { overflow: visible; } }
+@media (max-width: 1000px) { .review-pane { overflow: visible; scrollbar-gutter: auto; } }
+
+.review-pane[aria-label="Report"] { grid-area: report; }
+.review-pane[aria-label="Judgments"] { grid-area: judgments; }
+.review-pane[aria-label="Evidence"] { grid-area: evidence; }
+dialog { width: min(900px, 92vw); max-height: 90dvh; overflow: auto; border: 1px solid #879bad; border-radius: 8px; }
+dialog::backdrop { background: #17253466; }
+.info-link { border: 0; background: transparent; padding: .1rem .3rem; text-decoration: underline; }

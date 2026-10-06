@@ -106,6 +106,7 @@ def test_calculation_preview_resets_prior_claim_and_selected_passage(tmp_path, p
     with open_review(b, store, launch=False) as h, sync_playwright() as pw:
         browser = pw.chromium.launch(); page = browser.new_page(); page.goto(h.url)
         page.get_by_label('Assessor', exact=True).fill('Synthetic reviewer')
+        page.get_by_role('button', name='Sources and rubric', exact=True).click()
         page.get_by_role('button', name='Full frozen preview: Synthetic filing', exact=True).click()
         row = page.get_by_role('button', name='L6:', exact=False)
         row.click(); row.click()

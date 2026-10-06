@@ -159,3 +159,22 @@ def test_live_display_workload_and_links_update_without_mutating_bundle_identity
         with request(h, '/api/bundle') as r:
             assert json.load(r)['workload'] is None
     assert b.bundle_hash == bundle_hash
+
+
+def test_identical_post_submission_save_can_continue_but_changed_draft_cannot(tmp_path):
+    b = example_bundle()
+    store = FileStore(tmp_path)
+    with open_review(b, store, launch=False) as h:
+        body = {"bundle_id": b.bundle_id, "bundle_hash": b.bundle_hash, "revision": 0,
+                "key": "submit", "answers": answer(), "assessor": "Ada", "active_seconds": 2}
+        submitted = json.load(request(h, "/api/submit", "POST", body, Origin=h.origin))
+        body.update(revision=submitted["revision"], key="same-draft")
+        saved = json.load(request(h, "/api/save", "POST", body, Origin=h.origin))
+        assert saved["revision"] > saved["last_submission"]
+        assert json.load(request(h, "/api/next", "POST", body, Origin=h.origin)) == {"done": True}
+        body["answers"]["judgments"]["support:margin"]["note"] = "Changed explanation"
+        body.update(revision=saved["revision"], key="changed-draft")
+        json.load(request(h, "/api/save", "POST", body, Origin=h.origin))
+        with pytest.raises(HTTPError) as error:
+            request(h, "/api/next", "POST", body, Origin=h.origin)
+        assert error.value.code == 409

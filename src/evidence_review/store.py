@@ -137,6 +137,15 @@ def validate_answers(bundle, answers, complete=False):
     }
 
 
+def submission_matches_snapshot(state):
+    """A time/save-only revision does not invalidate the last immutable submission."""
+    prior = state.get("submissions", {}).get(str(state.get("last_submission")))
+    return bool(prior and prior.get("complete") is True
+                and prior.get("bundle_hash") == state.get("bundle_hash")
+                and prior.get("assessor") == state.get("assessor")
+                and {"judgments": prior.get("judgments"), "defects": prior.get("defects")} == state.get("answers"))
+
+
 class FileStore:
     def __init__(self, root):
         self.root = Path(root)

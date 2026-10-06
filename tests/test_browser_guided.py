@@ -71,7 +71,7 @@ def test_reviewer_works_one_item_at_a_time_and_reaches_the_next_unanswered(tmp_p
         expect(item).to_contain_text("Statement 1: operating margin was 24.6% in segment A.")
         expect(item).to_contain_text("The cited evidence states what the claim says.")
         expect(item.get_by_role("checkbox")).to_have_count(0)  # no claim-ID linking for a single-subject judgment
-        page.locator("#evidence-panel > summary").click()
+        assert page.locator("#evidence-panel").evaluate("node => node.open")
         expect(page.get_by_role("region", name="Evidence")).to_contain_text("L6 (cited)")
         # Keyboard: choose, then move to the next unanswered item.
         control = page.get_by_label("Evidence support: C1", exact=True)
@@ -112,6 +112,9 @@ def test_coverage_remains_visible_beside_independently_scrolling_claims_and_evid
         page = pw.chromium.launch().new_page(viewport={"width": 1440, "height": 900})
         page.goto(h.url)
         expect(page.locator("#status")).to_contain_text("Saved locally")
+        page.get_by_role("button", name="Review guide", exact=True).click()
+        expect(page.get_by_role("dialog", name="Review guide", exact=True)).to_contain_text("Did the 18% margin target hold")
+        page.get_by_role("button", name="Close review guide", exact=True).click()
         page.get_by_label("Assessor", exact=True).fill("Synthetic pane reviewer")
         page.get_by_role("button", name="23. Coverage: R1 · unanswered").click()
         item = page.get_by_label("Current item")
@@ -132,7 +135,9 @@ def test_coverage_remains_visible_beside_independently_scrolling_claims_and_evid
         evidence = page.get_by_role("region", name="Evidence", exact=True)
         evidence.get_by_role("button", name="Whole claim: Statement 14").click()
         expect(evidence).to_contain_text("L6 (cited)")
-        assert evidence.bounding_box()["x"] > item.bounding_box()["x"]
+        assert evidence.bounding_box()["y"] < report.bounding_box()["y"]
+        assert evidence.bounding_box()["width"] > report.bounding_box()["width"]
+        assert abs(report.bounding_box()["y"] - page.get_by_role("region", name="Judgments", exact=True).bounding_box()["y"]) < 1
         assert report.bounding_box()["x"] < item.bounding_box()["x"]
         evidence.evaluate("e => e.scrollTop = e.scrollHeight")
         assert abs(control.bounding_box()["y"] - before["y"]) < 1
@@ -181,6 +186,19 @@ def test_submit_lists_each_pending_explanation_without_losing_saved_choices(tmp_
         page.get_by_label("Explanation: Coverage: R1", exact=True).fill("Synthetic explanation one.")
         page.get_by_role("button", name="Submit review", exact=True).click()
         expect(page.get_by_label("Continuation status")).to_contain_text("submitted revision")
+        submitted = store.load_task(b.bundle_id)
+        page.get_by_label("Explanation: Coverage: R1", exact=True).fill("Synthetic explanation one.")
+        expect(page.get_by_label("Local save status")).to_contain_text(f"revision {submitted['revision'] + 1}")
+        page.get_by_role("button", name="Submit review", exact=True).click()
+        expect(page.get_by_label("Local save status")).to_contain_text("Already submitted")
+        expect(page.get_by_role("button", name="Next task", exact=True)).to_be_enabled()
+        assert len(store.load_task(b.bundle_id)["submissions"]) == 1
+        page.get_by_label("Explanation: Coverage: R1", exact=True).fill("Synthetic amended explanation.")
+        page.get_by_role("button", name="Submit review", exact=True).click()
+        expect(page.get_by_label("Local save status")).to_contain_text("amendment reason required")
+        page.get_by_label("Amendment reason", exact=True).fill("Synthetic correction to explanation.")
+        page.get_by_role("button", name="Submit review", exact=True).click()
+        expect(page.get_by_label("Local save status")).to_contain_text("Saved locally")
     saved = store.load_task(b.bundle_id)
     assert saved["last_submission"] is not None
     assert saved["answers"]["judgments"]["coverage:R1"]["value"] == "missing"

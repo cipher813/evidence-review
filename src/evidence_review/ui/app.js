@@ -90,6 +90,11 @@ async function api(path, body) {
   }
   return d;
 }
+function matchesSubmitted(candidate, assessor) {
+  const prior = state.submissions?.[String(state.last_submission)];
+  return prior && prior.complete && prior.bundle_hash === state.bundle_hash && prior.assessor === assessor
+    && !differences(candidate, { judgments: prior.judgments, defects: prior.defects }).length;
+}
 function status() {
   const completed = Object.keys(answers.judgments).length;
   const hook = state.hook;
@@ -108,7 +113,7 @@ function status() {
       (hook.reason ? ` · ${hook.reason}` : "")
     : "Continuation not started · nothing submitted yet";
   $("next").disabled =
-    state.last_submission !== state.revision || hook.status !== "succeeded";
+    !matchesSubmitted(answers, $("assessor").value.trim()) || hook.status !== "succeeded";
 }
 function logEvent(kind, subject = "") {
   // Navigation is recorded as exposure only; it never marks evidence verified.
@@ -119,6 +124,12 @@ function logEvent(kind, subject = "") {
     subject: String(subject).slice(0, 200),
   }).catch(() => {});
 }
+function canonical(value) {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === "object")
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])]));
+  return value;
+}
 function differences(mine, saved) {
   const out = [];
   const ids = new Set([
@@ -127,13 +138,13 @@ function differences(mine, saved) {
   ]);
   for (const id of ids)
     if (
-      JSON.stringify(mine.judgments[id] || null) !==
-      JSON.stringify(saved.judgments[id] || null)
+      JSON.stringify(canonical(mine.judgments[id] || null)) !==
+      JSON.stringify(canonical(saved.judgments[id] || null))
     ) {
       const field = bundle.form.find((f) => f.field_id === id);
       out.push(field ? field.label : id);
     }
-  if (JSON.stringify(mine.defects) !== JSON.stringify(saved.defects))
+  if (JSON.stringify(canonical(mine.defects)) !== JSON.stringify(canonical(saved.defects)))
     out.push("Defects");
   return out;
 }
@@ -193,6 +204,12 @@ function save(submit = false) {
       if (conflicted) {
         $("status").textContent =
           "Revision conflict: reload saved state before editing.";
+        return;
+      }
+      if (submit && !reason.trim() && matchesSubmitted(snapshot, $("assessor").value.trim())) {
+        active += elapsed;
+        status();
+        $("status").textContent = `Already submitted at revision ${state.last_submission}. Your current choices match that submission.`;
         return;
       }
       $("status").textContent = "Saving…";
@@ -1060,12 +1077,12 @@ function render() {
   }
   renderReport();
   const guide = $("resource-guide"); guide.replaceChildren(el("h2", "Resource guide"));
-  guide.append(el("p", "Sources remain the authority. The exact saved answer appears below as its original summary, structured statements and qualifications. Candidate citations and formulas preserve missing or invalid evidence. Number links expose inputs and deterministic arithmetic; prepared evidence is separately attributed and is not a support verdict."));
+  guide.append(el("p", "Sources remain the authority. The exact saved answer appears in the response pane as its original summary, structured statements and qualifications. Candidate citations and formulas preserve missing or invalid evidence. Number links expose inputs and deterministic arithmetic; prepared evidence is separately attributed and is not a support verdict."));
   guide.append(el("h3", "Every eligible frozen source"));
   bundle.sources.forEach((s) => {
     const row = el("p", `${s.title} · type: ${s.metadata.document_type || s.metadata.type || s.metadata.kind || "not supplied"} · period: ${s.metadata.period || "not supplied"} · SHA-256 ${s.sha256}`);
     const preview = el("button", "Full frozen preview: " + s.title);
-    preview.onclick = () => { $("evidence").replaceChildren(); showSource(s); };
+    preview.onclick = () => { $("resource-dialog").close(); $("evidence").replaceChildren(); showSource(s); };
     row.append(preview); guide.append(row);
   });
   guide.append(el("h3", "Reference verification status"), el("p", "A reference checklist is not gold truth. Verification is not established unless explicitly supplied in task context; check its evidence against the frozen sources."));
@@ -1091,7 +1108,7 @@ function render() {
   renderForms();
   const first = bundle.form.find((f) => f.field_id === current);
   if (first && subjectOf(first)) showSubject(subjectOf(first), first.subject_id, false);
-  $("evidence-panel").open = false;
+  $("evidence-panel").open = true;
   renderDefects();
   $("subjects").replaceChildren();
   [...bundle.claims, ...bundle.references].forEach((c) => {
@@ -1128,6 +1145,10 @@ async function load() {
   queue = Promise.resolve();
   render();
 }
+$("open-guide").onclick = () => $("review-guide").showModal();
+$("close-guide").onclick = () => $("review-guide").close();
+$("open-resources").onclick = () => $("resource-dialog").showModal();
+$("close-resources").onclick = () => $("resource-dialog").close();
 $("assessor").oninput = () =>
   sessionStorage.setItem("assessor", $("assessor").value.trim());
 $("add-defect").onclick = () => {

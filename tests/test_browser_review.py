@@ -157,7 +157,7 @@ def test_independent_browser_traffic_carries_no_blinded_marker(tmp_path):
         page.get_by_label(SUPPORT, exact=True).select_option("supported")
         page.get_by_label("I reviewed the full report.", exact=True).check()
         expect(page.locator("#status")).to_contain_text("revision 2")
-        page.locator("#evidence-panel > summary").click()
+        assert page.locator("#evidence-panel").evaluate("node => node.open")
         page.get_by_label("Search frozen sources (press /)").fill("script")
         page.get_by_role("button", name="Synthetic filing L11", exact=False).first.click()
         page.get_by_role("button", name="Submit review", exact=True).click()

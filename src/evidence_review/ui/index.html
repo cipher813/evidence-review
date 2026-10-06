@@ -10,7 +10,6 @@
     <header>
       <h1>Evidence Review</h1>
       <p id="task"></p>
-      <div id="workload" aria-label="Assigned workload"></div>
       <label>Assessor <input id="assessor" autocomplete="name" /></label>
       <p id="status" role="status" aria-live="polite" aria-label="Local save status">
         Loading…
@@ -22,15 +21,11 @@
         <button id="use-saved" type="button">Use saved version</button
         ><button id="keep-mine" type="button">Keep this tab's answers as a new revision</button>
       </div>
+      <button id="open-guide" class="info-link" type="button">Review guide</button>
+      <button id="open-resources" class="info-link" type="button">Sources and rubric</button>
     </header>
     <main>
       <section class="review-pane" aria-label="Report" tabindex="0">
-        <div id="instructions" aria-label="What to do"></div>
-        <div id="context-box" aria-label="Task context">
-          <h2>Study and task context</h2>
-          <p class="legend">Caller-provided study guidance and question. These are not part of the saved answer.</p>
-          <div id="context"></div>
-        </div>
         <h2>Exact saved answer under review</h2>
         <p class="legend">
           Reported numbers open exact source lines when located. Derived numbers show their formula. Preview evidence keeps you here. <span class="number">Mapped</span>
@@ -39,7 +34,6 @@
           <span class="number identifier">Date or identifier</span>
         </p>
         <div id="report"></div>
-        <section id="resource-guide" aria-label="Resource guide"></section>
         <details>
           <summary>All claims and reference items</summary>
           <div id="subjects"></div>
@@ -81,6 +75,20 @@
       </details>
       </section>
     </main>
+    <dialog id="review-guide" aria-label="Review guide">
+      <button id="close-guide" type="button">Close review guide</button>
+      <div id="workload" aria-label="Assigned workload"></div>
+        <div id="instructions" aria-label="What to do"></div>
+        <div id="context-box" aria-label="Task context">
+          <h2>Study and task context</h2>
+          <p class="legend">Caller-provided study guidance and question. These are not part of the saved answer.</p>
+          <div id="context"></div>
+        </div>
+    </dialog>
+    <dialog id="resource-dialog" aria-label="Sources and rubric">
+      <button id="close-resources" type="button">Close sources and rubric</button>
+        <section id="resource-guide" aria-label="Resource guide"></section>
+    </dialog>
     <script src="/app.js" defer></script>
   </body>
 </html>

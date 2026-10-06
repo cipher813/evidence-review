@@ -189,13 +189,16 @@ def test_resource_guide_lists_every_frozen_source_and_reference_status(tmp_path)
     b.sources[0].metadata = {'type': 'filing', 'period': 'FY2026'}
     with open_review(b, FileStore(tmp_path), launch=False) as h, sync_playwright() as pw:
         browser = pw.chromium.launch(); page = browser.new_page(); page.goto(h.url)
+        page.get_by_role('button', name='Sources and rubric', exact=True).click()
         guide = page.get_by_role('region', name='Resource guide', exact=True)
         expect(guide).to_be_visible()
         expect(guide).to_contain_text('FY2026')
         expect(guide).to_contain_text('filing')
         expect(guide).to_contain_text('Sources remain the authority')
         expect(guide).to_contain_text('Reference verification status')
+        page.get_by_role('button', name='Close sources and rubric', exact=True).click()
         for source in b.sources:
+            page.get_by_role('button', name='Sources and rubric', exact=True).click()
             guide.get_by_role('button', name='Full frozen preview: ' + source.title, exact=True).click()
             expect(page.get_by_role('region', name='Evidence', exact=True)).to_contain_text(source.text.splitlines()[0])
         expect(page.get_by_label(SUPPORT, exact=True)).to_have_value('')
