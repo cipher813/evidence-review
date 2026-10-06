@@ -70,6 +70,7 @@ def test_reviewer_works_one_item_at_a_time_and_reaches_the_next_unanswered(tmp_p
         expect(item).to_contain_text("Statement 1: operating margin was 24.6% in segment A.")
         expect(item).to_contain_text("The cited evidence states what the claim says.")
         expect(item.get_by_role("checkbox")).to_have_count(0)  # no claim-ID linking for a single-subject judgment
+        page.locator("#evidence-panel > summary").click()
         expect(page.get_by_role("region", name="Evidence")).to_contain_text("L6 (cited)")
         # Keyboard: choose, then move to the next unanswered item.
         control = page.get_by_label("Evidence support: C1", exact=True)
@@ -86,16 +87,17 @@ def test_reviewer_works_one_item_at_a_time_and_reaches_the_next_unanswered(tmp_p
         # A statement with an unavailable source says so instead of implying support.
         page.get_by_role("button", name="3. Evidence support: C3 · unanswered").click()
         expect(page.get_by_role("region", name="Evidence")).to_contain_text("operand not found in frozen sources")
-        # Clicking a number in the answer opens that statement's decision.
+        # Opening source evidence preserves the current judgment.
         page.get_by_role("region", name="Report").get_by_role("button", name="24.6%, cited").nth(4).click()
-        expect(item).to_contain_text("Evidence support: C5")
+        expect(item).to_contain_text("Evidence support: C3")
         # Coverage can link several claims, shown by their text.
         page.get_by_role("button", name="23. Coverage: R1 · unanswered").click()
         expect(item).to_contain_text("Reference point 1: revenue fell to 1,150.")
         item.get_by_label("Coverage: R1", exact=True).select_option("partially addressed")
+        item.get_by_label("Explanation: Coverage: R1", exact=True).fill("Synthetic partial coverage requires explanation.")
         item.get_by_role("checkbox", name="C1: Statement 1").check()
         item.get_by_role("checkbox", name="C2: Statement 2").check()
-        expect(page.get_by_label("Review progress")).to_contain_text("2 of 30 required answers given")
+        expect(page.get_by_label("Review progress")).to_contain_text("2 of 30 required fields complete")
     saved = store.load_task(b.bundle_id)["answers"]["judgments"]
     assert saved["support:C1"]["value"] == "supported"
     assert saved["coverage:R1"]["claim_ids"] == ["C1", "C2"]

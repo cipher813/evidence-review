@@ -67,13 +67,14 @@ def test_margin_arithmetic_and_source_support_are_distinct():
     r = b.claims[0].calculation.recomputation
     assert (r["status"], r["result"], r["evidence_verified"]) == ("match", "180.0", False)
     assert r["evidence"]["status"] == "all_operands_cited"
-    # Remove prior-period evidence: arithmetic still displays, support is unresolved.
+    # Remove prior-period evidence: display stays unresolved; arithmetic is diagnostic only.
     missing = build(
         [("summary", "Operating margin rose 180 bps to 24.6%.", ["margin"])],
         [margin_claim(unavailable())],
     )
     r = missing.claims[0].calculation.recomputation
-    assert r["status"] == "match"
+    assert r["status"] == "unresolved" and r["result"] is None
+    assert r["arithmetic"]["status"] == "match"
     assert r["evidence"] == {
         "status": "operand_evidence_missing",
         "missing": ["prior"],

@@ -1,6 +1,6 @@
 [project]
 name = "evidence-review"
-version = "0.3.0"
+version = "0.4.0"
 description = "Local evidence-linked human review with durable revisions"
 requires-python = ">=3.12,<3.13"
 license = "MIT"

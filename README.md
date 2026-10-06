@@ -30,7 +30,7 @@ evidence-review serve --bundle bundle.json --state-dir review-data
 evidence-review export --state-dir review-data --task <bundle-id> --revision 1
 ```
 
-Enter your assessor name once. Click a report number or claim to see its cited lines with surrounding paragraph, table header and table notes; calculations show the formula, each input with its own evidence, the Decimal recomputation and whether every input is cited. Unresolved numbers are marked with `?`, dates and identifiers with `#`. Open the full frozen source or search it (press `/`), then select its first and last line to attach a passage. Choose support and coverage explicitly; record defects and materiality when applicable. Submit after reviewing the full report. Later submissions require an amendment reason.
+Enter your assessor name once. A reported number with one exact source opens its original line in a new tab; adjacent Preview evidence keeps the frozen context local. A derived number opens a compact calculation card with directly linked input values and an optional full preview. Arithmetic results remain unresolved when source inputs are missing. Only explicitly bound per-number evidence is used; whole-claim evidence is a separately labeled action. Unresolved numbers are marked with `?`, dates and identifiers with `#`. Open the full frozen source or search it (press `/`), then select its first and last line to attach a passage. Choose support and coverage explicitly; record defects and materiality when applicable. Submit after reviewing the full report. Later submissions require an amendment reason.
 
 Each edit saves on input and displays Saving until acknowledgement. Required boolean decisions accept explicit Yes or No; completion acknowledgements require Yes. Local save status and caller continuation/backup status are shown on separate lines. If another tab saved first, nothing is overwritten: the app lists the differing answers and you choose to load the saved version or keep this tab's answers as a new revision.
 
@@ -48,12 +48,13 @@ A healthy result is a green full suite, a passing whole-source coverage floor, i
 
 CI publishes measured badge JSON only after a successful main run; absent measurements display unknown. Main-only publication creates an immutable versioned wheel, checksums, package verification record and generated changelog in a GitHub release. Different wheel content requires a version bump. No PyPI release is implied.
 
-Tests cover two bundle shapes, source/hash/locator checks, calculations, replay, stale tabs, revisions, hooks and loopback authorization. Browser timings are synthetic tests, not a human usability study. Numeric extraction is deterministic; missing or ambiguous evidence remains visible. Source-table header discovery is heuristic; full text and footnotes remain available.
+Tests cover two bundle shapes, source/hash/locator checks, calculations, replay, stale tabs, revisions, hooks and loopback authorization. Browser timings are synthetic tests, not a human usability study. Numeric extraction is deterministic; missing or ambiguous evidence remains visible. Conservative table parsing renders uniquely aligned headers and rows; ambiguous layouts remain explicitly unparsed with numbered original lines, full text and footnotes available. Caller-supplied workload separates assigned answers from required judgments, optional fields and completion controls. Prepared evidence remains separately labeled and never repairs the answer silently.
 
 ## Where is the rest?
 
 - [SPEC.md](SPEC.md): contracts and intended behavior.
 - [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md): implementation design.
+- [docs/USABILITY_IMPLEMENTATION.md](docs/USABILITY_IMPLEMENTATION.md): navigation, evidence and workload qualification, with remaining human gates.
 - [docs/OPERATIONS.md](docs/OPERATIONS.md): installation, compatibility, upgrade, recovery, retention and blinding.
 - [BUILD_STATUS.md](BUILD_STATUS.md) and [HARDENING.md](HARDENING.md): verification and hardening register.
 - [CONTRIBUTING.md](CONTRIBUTING.md): changes and verification.

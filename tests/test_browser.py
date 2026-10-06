@@ -19,10 +19,9 @@ def test_browser_review_reload_amend_and_safe_text(tmp_path):
         expect(page.locator("#status")).to_contain_text("Saved locally")
         page.get_by_label("Assessor", exact=True).fill("Synthetic reviewer")
         page.get_by_label("Assessor", exact=True).press("Tab")
-        page.get_by_role("button", name="180 bps, derived", exact=True).click()
-        expect(page.get_by_role("region", name="Evidence")).to_contain_text(
-            "current-prior"
-        )
+        page.get_by_role("region", name="Report", exact=True).get_by_role("button", name="180 bps, derived", exact=True).click()
+        page.get_by_role("button", name="Whole claim: Margin rose", exact=False).click()
+        expect(page.get_by_role("region", name="Evidence")).to_contain_text("current-prior")
         expect(page.get_by_role("region", name="Evidence")).to_contain_text("22.8")
         expect(page.get_by_role("region", name="Evidence")).to_contain_text("Absolute tolerance:")
         page.get_by_role("button", name="Open full frozen source").first.click()
