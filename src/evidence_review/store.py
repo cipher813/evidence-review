@@ -76,10 +76,13 @@ def validate_answers(bundle, answers, complete=False):
     sources = {s.source_id: s for s in bundle.sources}
     for key, j in judgments.items():
         field = fields[key]
+        # Optional notes/selections may be retained without inventing a verdict.
+        # Subject and source validation below still applies to these annotations.
+        unanswered_optional = not field.required and j.value == ""
         if (
             field.kind == "choice"
             and j.value not in field.options
-            and (complete or j.value != "")
+            and ((complete and field.required) or j.value != "")
         ):
             raise ValueError("unknown option")
         if field.kind == "boolean" and type(j.value) is not bool:
@@ -90,15 +93,17 @@ def validate_answers(bundle, answers, complete=False):
             raise ValueError("unknown selected claim")
         if (
             complete
+            and not unanswered_optional
             and field.note_required_unless
             and j.value not in field.note_required_unless
             and not j.note.strip()
         ):
             raise ValueError(f"explanation required: {key}")
-        if complete and field.evidence_required and not j.selections:
+        if complete and not unanswered_optional and field.evidence_required and not j.selections:
             raise ValueError(f"evidence required: {key}")
         if (
             complete
+            and not unanswered_optional
             and bundle.task_kind == "adjudication"
             and not field.require_true
             and not j.note.strip()

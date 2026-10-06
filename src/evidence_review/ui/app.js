@@ -890,19 +890,19 @@ function progress() {
     `Judgment ${jAt >= 0 ? jAt + 1 : 1} of ${judgments.length} in this answer · ` +
     `${done} of ${required.length} required fields complete · ${optional} optional field${optional === 1 ? "" : "s"} · ${technical} completion control${technical === 1 ? "" : "s"}` +
     (at >= 0 ? ` · item ${at + 1} of ${items.length}` : "") +
-    (next ? ` · next unanswered: ${next.label}` : items.length ? " · every item answered; finish below" : "");
+    (next ? ` · next unanswered: ${next.label}` : items.length ? " · required items answered; finish below" : "");
   const field = bundle.form.find((f) => f.field_id === current);
   const j = field && answers.judgments[field.field_id];
   const missing = [];
-  if (j && field.note_required_unless.length && !field.note_required_unless.includes(j.value) && !j.note.trim()) missing.push("explanation");
-  if (j && field.evidence_required && !j.selections.length) missing.push("source passage");
+  if (j && (field.required || j.value !== "") && field.note_required_unless.length && !field.note_required_unless.includes(j.value) && !j.note.trim()) missing.push("explanation");
+  if (j && (field.required || j.value !== "") && field.evidence_required && !j.selections.length) missing.push("source passage");
   if (missing.length) $("progress").textContent += " · Pending: " + missing.join(" and ");
   const button = $("next-item");
   if (button) button.textContent = next ? "Next unanswered item" : "Go to finish";
 }
 function showSubmissionBlockers() {
   const box = $("submission-blockers");
-  const pending = bundle.form.filter((f) => f.required && !answered(f));
+  const pending = bundle.form.filter((f) => (f.required || (answers.judgments[f.field_id] && answers.judgments[f.field_id].value !== "")) && !answered(f));
   box.replaceChildren(el("p", `${pending.length} fields need attention before submission. Your decisions are unchanged.`));
   pending.forEach((f) => {
     const j = answers.judgments[f.field_id];
