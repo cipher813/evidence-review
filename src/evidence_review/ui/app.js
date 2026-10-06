@@ -744,7 +744,7 @@ function nextUnanswered() {
   const at = items.findIndex((f) => f.field_id === current);
   for (let k = 1; k <= items.length; k++) {
     const f = items[(at + k + items.length) % items.length];
-    if (!answered(f)) return f;
+    if (f.required && !answered(f)) return f;
   }
   return null;
 }
@@ -922,7 +922,8 @@ function showSubmissionBlockers() {
 function renderForms() {
   const items = itemFields();
   if (current === null || !items.some((f) => f.field_id === current))
-    current = (items.find((f) => !answered(f)) || items[0] || {}).field_id ?? null;
+    current = (items.find((f) => f.required && !answered(f)) || items.find((f) => f.required) || {}).field_id ?? null;
+  if (!items.some((f) => f.required) && current === null) $("item-navigation").open = false;
   $("item-links").replaceChildren();
   claimLinks(bundle.form.find((f) => f.field_id === current));
   $("items").replaceChildren();
@@ -935,7 +936,7 @@ function renderForms() {
       const saved = j && j.value !== "";
       const pending = j && f.note_required_unless.length && !f.note_required_unless.includes(j.value) && !j.note.trim()
         ? "needs explanation" : "incomplete";
-      const state = answered(f) ? "answered" : saved ? `selected · ${pending}` : "unanswered";
+      const state = answered(f) ? "answered" : saved ? `selected · ${pending}` : f.required ? "unanswered" : "optional";
       const open = el(
         "button",
         `${i + 1}. ${f.label} · ${state}${item ? " · " + short(item.text, 70) : ""}`,
