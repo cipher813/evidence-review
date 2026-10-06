@@ -12,7 +12,7 @@ from importlib.resources import files
 from urllib.parse import urlsplit, parse_qsl
 from .contracts import ReviewWorkload, PACKAGE_VERSION, blind_terms, blind_violations, validate_bundle
 from .evidence import evidence_views, inventory, navigation_coverage
-from .store import Conflict
+from .store import Conflict, submission_matches_snapshot
 from .hooks import Hooks, run_hook
 
 EVENT_KINDS = {
@@ -296,7 +296,7 @@ def open_review(
                     if self.path == "/api/next":
                         state = store.load_task(b.bundle_id)
                         if (
-                            state["last_submission"] != state["revision"]
+                            not submission_matches_snapshot(state)
                             or state["hook"]["status"] != "succeeded"
                         ):
                             raise Conflict("submission/continuation incomplete")

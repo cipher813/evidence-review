@@ -1,3 +1,4 @@
+*, *::before, *::after { box-sizing: border-box; }
 :root {
   font-family: system-ui, sans-serif;
   color: #172534;
@@ -5,9 +6,12 @@
 }
 body {
   margin: 0;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
 }
 header {
-  padding: 1rem 2rem;
+  padding: .5rem 1rem;
   border-bottom: 1px solid #ccd7e0;
   background: white;
 }
@@ -17,7 +21,12 @@ h1 {
 }
 main {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  grid-template-rows: minmax(0, .35fr) minmax(0, .65fr);
+  grid-template-areas: "evidence evidence" "report judgments";
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
   gap: 1rem;
   padding: 1rem;
 }
@@ -27,8 +36,7 @@ section {
   padding: 1rem;
   border: 1px solid #d3dde5;
   border-radius: 8px;
-  max-height: 78vh;
-  overflow: auto;
+
 }
 label {
   display: block;
@@ -161,11 +169,13 @@ small {
 }
 @media (max-width: 1000px) {
   main {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto;
+    grid-template-areas: "report" "judgments" "evidence";
   }
-  section {
-    max-height: none;
-  }
+  body { height: auto; display: block; }
+  main { overflow: visible; }
+  .review-pane { overflow: visible; scrollbar-gutter: auto; }
 }
 .original-link {
   font-weight: 600;
@@ -229,3 +239,19 @@ tr.cited { background: #d9edff; }
 .preview-link { font-size: .75rem; padding: .05rem .2rem; margin: 0 .25rem; }
 .calculation-card { display: block; background: #fff; border: 2px solid #1f5f99; padding: .75rem; margin: .4rem 0; white-space: normal; }
 a:focus-visible { outline: 3px solid #1f4fd1; outline-offset: 2px; }
+
+/* Only top-level panes scroll; context and nested evidence keep one scroll surface. */
+.review-pane { overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+header p { margin: .25rem 0; }
+header label { margin: .25rem 0; }
+.review-pane > h2 { margin-top: 0; }
+#item-navigation { margin-top: .7rem; }
+.claim-choice { padding: .25rem; background: #edf5ff; }
+@media (max-width: 1000px) { .review-pane { overflow: visible; scrollbar-gutter: auto; } }
+
+.review-pane[aria-label="Report"] { grid-area: report; }
+.review-pane[aria-label="Judgments"] { grid-area: judgments; }
+.review-pane[aria-label="Evidence"] { grid-area: evidence; }
+dialog { width: min(900px, 92vw); max-height: 90dvh; overflow: auto; border: 1px solid #879bad; border-radius: 8px; }
+dialog::backdrop { background: #17253466; }
+.info-link { border: 0; background: transparent; padding: .1rem .3rem; text-decoration: underline; }

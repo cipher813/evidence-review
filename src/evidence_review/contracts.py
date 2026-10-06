@@ -5,11 +5,12 @@ import hashlib
 import json
 import re
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-PACKAGE_VERSION = "0.4.3"
+PACKAGE_VERSION = "0.4.4"
 
 
 def canonical_json(value) -> bytes:
@@ -208,6 +209,8 @@ class NumericSpan(Strict):
     context: NumericContext | None = None
     prepared_evidence: list[PreparedEvidence] = Field(default_factory=list)
     diagnostics: NumericDiagnostics | None = None
+    # Independently located inputs, even when the whole calculation is unresolved.
+    prepared_inputs: list[Operand] = Field(default_factory=list)
 
 
 class ReviewWorkload(Strict):
@@ -299,12 +302,12 @@ class ReviewBundle(Strict):
                 raise ValueError("mapped span needs claims")
             if n.diagnostics and bool(n.prepared_evidence) != (n.diagnostics.preparation_status == "resolved"):
                 raise ValueError("prepared evidence contradicts diagnostic outcome")
-            if n.state == "identifier" and (n.citations or n.calculation or n.prepared_evidence or n.diagnostics):
+            if n.state == "identifier" and (n.citations or n.calculation or n.prepared_evidence or n.prepared_inputs or n.diagnostics):
                 raise ValueError("identifier spans carry no evidence")
         context = {f.path for f in self.fields if f.role == "context"}
         for n in self.spans:
             if n.field_path in context and (
-                n.claim_ids or n.citations or n.calculation or n.prepared_evidence or n.context or n.diagnostics or n.state != "identifier"
+                n.claim_ids or n.citations or n.calculation or n.prepared_evidence or n.prepared_inputs or n.context or n.diagnostics or n.state != "identifier"
             ):
                 raise ValueError("context numbers are not assertions")
         def validate_calc(calc, depth=0):
@@ -324,6 +327,28 @@ class ReviewBundle(Strict):
                 for d in [*n.diagnostics.candidate, *(d for a in n.diagnostics.attempts for d in a.diagnostics)]:
                     if d.citation:
                         validate_citation(d.citation, sources)
+        for n in self.spans:
+            original = {o.name: o for o in n.calculation.operands} if n.calculation else {}
+            if len({o.name for o in n.prepared_inputs}) != len(n.prepared_inputs):
+                raise ValueError("duplicate prepared input")
+            for o in n.prepared_inputs:
+                candidate = original.get(o.name)
+                try:
+                    equal_value = candidate is not None and Decimal(o.value).is_finite() and Decimal(candidate.value).is_finite() and Decimal(o.value) == Decimal(candidate.value)
+                except InvalidOperation:
+                    equal_value = False
+                if not equal_value or any(getattr(o, k) != getattr(candidate, k) for k in ("unit", "period")):
+                    raise ValueError("prepared input does not match candidate identity, value, period and unit")
+                if o.citation:
+                    validate_citation(o.citation, sources)
+                if o.calculation:
+                    validate_calc(o.calculation)
+                from .evidence import operand_evidence, calculation_citations
+                source_leaves = ([o.citation] if o.citation else []) + (list(calculation_citations(o.calculation)) if o.calculation else [])
+                if o.kind == "constant" or not source_leaves or any(c.status != "located" for c in source_leaves):
+                    raise ValueError("prepared input requires actual located source leaves")
+                if operand_evidence([o], o.unit, [])["missing"]:
+                    raise ValueError("prepared input must have located source evidence")
         prepared = [p for n in self.spans for p in n.prepared_evidence]
         for c in [*self.claims, *self.references, *self.spans, *prepared]:
             for citation in c.citations:
@@ -347,6 +372,8 @@ class ReviewBundle(Strict):
         # Absent optional diagnostics preserve pre-diagnostics durable identities.
         # Supplied diagnostics remain hashed; all other legacy fields stay intact.
         for span in payload["spans"]:
+            if not span["prepared_inputs"]:
+                del span["prepared_inputs"]
             if span["diagnostics"] is None:
                 del span["diagnostics"]
         return digest(payload)

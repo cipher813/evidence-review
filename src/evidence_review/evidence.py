@@ -202,6 +202,18 @@ def evidence_views(bundle):
                 from .table_context import table_context
                 view["table"] = table_context(sources[c.source_id], c.start_line, c.end_line)
                 views[key] = view
+    for span in bundle.spans:
+        for operand in span.prepared_inputs:
+            cites = ([operand.citation] if operand.citation else [])
+            if operand.calculation:
+                cites += list(calculation_citations(operand.calculation))
+            for c in cites:
+                key = f"{c.source_id}:{c.start_line}:{c.end_line}"
+                view = passage(sources[c.source_id], c.start_line, c.end_line)
+                view.pop("full_text")
+                from .table_context import table_context
+                view["table"] = table_context(sources[c.source_id], c.start_line, c.end_line)
+                views[key] = view
     return views
 
 
@@ -329,7 +341,16 @@ def navigation_coverage(bundle, links):
                 'Multiple possible sources—no exact match established' if n.state == 'ambiguous'
                 else 'Choose among cited sources' if len(n.citations) > 1
                 else 'No exact source link' if n.citations else 'No source located')})
-    return {'asserted_spans': len(asserted), 'cited_spans': sum(bool(n.citations) for n in asserted),
+    prepared_operands = [o for n in asserted for o in n.prepared_inputs]
+    prepared_cites = []
+    for o in prepared_operands:
+        if o.citation:
+            prepared_cites.append(o.citation)
+        if o.calculation:
+            prepared_cites += list(calculation_citations(o.calculation))
+    return {'prepared_inputs': len(prepared_operands), 'prepared_input_source_leaves': len(prepared_cites),
+            'prepared_input_source_leaves_with_links': sum(exact(c) for c in prepared_cites),
+            'asserted_spans': len(asserted), 'cited_spans': sum(bool(n.citations) for n in asserted),
             'direct_spans': direct, 'derived_spans': derived, 'cited_operands': operands,
             'cited_operands_with_links': linked, 'unresolved': unresolved,
             'evidence_verified': False}

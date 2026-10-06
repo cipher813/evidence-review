@@ -58,6 +58,7 @@ def test_scoped_diagnostics_inline_expanded_safe_text_and_unchanged_answers(tmp_
         before=store.load_task(b.bundle_id)["answers"]
         page.get_by_role("region",name="Report",exact=True).get_by_role("button",name="180 bps, candidate evidence derived; preparation resolved",exact=True).click()
         card=page.get_by_role("region",name="Calculation details")
+        card.get_by_text("Technical diagnostics", exact=True).first.click()
         expect(card).to_contain_text("Independent preparation: resolved")
         expect(card).to_contain_text("Earlier method — exact table cell: unresolved")
         expect(card).to_contain_text("Original excerpt does not match <img")
@@ -66,6 +67,7 @@ def test_scoped_diagnostics_inline_expanded_safe_text_and_unchanged_answers(tmp_
         texts=card.locator(".number-diagnostics").inner_text()
         page.get_by_role("button",name="Preview calculation evidence",exact=True).click()
         panel=page.get_by_role("region",name="Evidence")
+        panel.get_by_text("Technical diagnostics", exact=True).first.click()
         assert panel.locator(".number-diagnostics").inner_text()==texts
         panel.get_by_role("button",name="Inspect diagnostic source filing",exact=True).click()
         expect(panel).to_contain_text("Operating margin")
@@ -97,6 +99,7 @@ def test_unresolved_diagnostics_remain_visible_with_safe_bad_range_inspection(tm
         browser=launch(pw);page=browser.new_page();page.goto(h.url)
         page.get_by_role("region",name="Report",exact=True).get_by_role("button",name="180 bps, candidate evidence derived; preparation unresolved",exact=True).click()
         card=page.get_by_role("region",name="Calculation details")
+        card.get_by_text("Technical diagnostics", exact=True).first.click()
         expect(card).to_contain_text("Independent preparation: unresolved")
         expect(card).not_to_contain_text("Earlier method")
         card.get_by_role("button",name="Inspect diagnostic source filing",exact=True).click()

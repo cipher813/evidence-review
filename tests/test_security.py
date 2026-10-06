@@ -37,7 +37,9 @@ def test_draft_after_submission_blocks_next_and_old_hook_cannot_replace_amendmen
     with open_review(b, s, launch=False) as h:
         s.save_submission(b, 0, "submit", answer(), "Ada")
         run_hook(s, b.bundle_id, 1)
-        s.save_snapshot(b, 1, "draft", answer(), "Ada")
+        changed = answer()
+        changed["judgments"]["support:margin"]["note"] = "Changed explanation requiring amendment"
+        s.save_snapshot(b, 1, "draft", changed, "Ada")
         with pytest.raises(HTTPError) as e:
             request(
                 h,
@@ -47,7 +49,7 @@ def test_draft_after_submission_blocks_next_and_old_hook_cannot_replace_amendmen
                 Origin=h.origin,
             )
         assert e.value.code == 409
-        s.save_submission(b, 2, "amend", answer(), "Ada", 0, "changed")
+        s.save_submission(b, 2, "amend", changed, "Ada", 0, "changed")
         with pytest.raises(Conflict):
             s.hook_status(
                 b.bundle_id, 1, {"status": "succeeded", "identifier": "stale"}

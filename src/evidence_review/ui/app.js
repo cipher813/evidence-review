@@ -90,12 +90,17 @@ async function api(path, body) {
   }
   return d;
 }
+function matchesSubmitted(candidate, assessor) {
+  const prior = state.submissions?.[String(state.last_submission)];
+  return prior && prior.complete && prior.bundle_hash === state.bundle_hash && prior.assessor === assessor
+    && !differences(candidate, { judgments: prior.judgments, defects: prior.defects }).length;
+}
 function status() {
   const completed = Object.keys(answers.judgments).length;
   const hook = state.hook;
   $("status").className = "";
   $("status").textContent =
-    `Draft: Saved locally · revision ${state.revision} · ${completed}/${bundle.form.length} fields answered`;
+    `${matchesSubmitted(answers, $("assessor").value.trim()) ? "Submitted" : "Draft"}: Saved locally · revision ${state.revision} · ${completed}/${bundle.form.length} fields answered`;
   // Consumer backup/import status is never folded into the local save message.
   const submitted = state.last_submission
     ? `submitted revision ${state.last_submission}`
@@ -108,7 +113,7 @@ function status() {
       (hook.reason ? ` · ${hook.reason}` : "")
     : "Continuation not started · nothing submitted yet";
   $("next").disabled =
-    state.last_submission !== state.revision || hook.status !== "succeeded";
+    !matchesSubmitted(answers, $("assessor").value.trim()) || hook.status !== "succeeded";
 }
 function logEvent(kind, subject = "") {
   // Navigation is recorded as exposure only; it never marks evidence verified.
@@ -119,6 +124,12 @@ function logEvent(kind, subject = "") {
     subject: String(subject).slice(0, 200),
   }).catch(() => {});
 }
+function canonical(value) {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === "object")
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])]));
+  return value;
+}
 function differences(mine, saved) {
   const out = [];
   const ids = new Set([
@@ -127,13 +138,13 @@ function differences(mine, saved) {
   ]);
   for (const id of ids)
     if (
-      JSON.stringify(mine.judgments[id] || null) !==
-      JSON.stringify(saved.judgments[id] || null)
+      JSON.stringify(canonical(mine.judgments[id] || null)) !==
+      JSON.stringify(canonical(saved.judgments[id] || null))
     ) {
       const field = bundle.form.find((f) => f.field_id === id);
       out.push(field ? field.label : id);
     }
-  if (JSON.stringify(mine.defects) !== JSON.stringify(saved.defects))
+  if (JSON.stringify(canonical(mine.defects)) !== JSON.stringify(canonical(saved.defects)))
     out.push("Defects");
   return out;
 }
@@ -195,6 +206,12 @@ function save(submit = false) {
           "Revision conflict: reload saved state before editing.";
         return;
       }
+      if (submit && !reason.trim() && matchesSubmitted(snapshot, $("assessor").value.trim())) {
+        active += elapsed;
+        status();
+        $("status").textContent = `Already submitted at revision ${state.last_submission}. Your current choices match that submission.`;
+        return;
+      }
       $("status").textContent = "Saving…";
       const body = {
         bundle_id: bundle.bundle_id,
@@ -208,6 +225,7 @@ function save(submit = false) {
       if (submit) body.amendment_reason = reason;
       try {
         state = await api(submit ? "/api/submit" : "/api/save", body);
+        if (submit) $("submission-blockers").hidden = true;
         status();
       } catch (err) {
         if (err.status === 409) {
@@ -229,12 +247,13 @@ function save(submit = false) {
         active += elapsed;
         $("status").className = "save-error";
         $("status").textContent =
-          "Not saved: " +
+          (submit ? "Not submitted: " : "Not saved: ") +
           err.message +
           (conflicted
             ? " · reload to reconcile before continuing."
             : " · correct the fields and save again.");
         $("next").disabled = true;
+        if (submit) showSubmissionBlockers();
       }
     });
   return queue;
@@ -388,49 +407,63 @@ function showSubject(item, id, follow = true) {
       el("p", "No cited evidence; search the frozen sources."),
     );
 }
-function operandValue(o, box, preview) {
-  const row = el("p");
-  row.append(document.createTextNode(`Input ${o.name}: `));
+function linkedInput(o) {
   const c = o.citation;
   const href = c?.status === "located" && (evidence.links || {})[c.source_id]?.line_url
     ? originalHref(c.source_id, c.excerpt, c.start_line, c.end_line) : null;
   const value = el(href ? "a" : "span", o.value);
-  if (href) { value.href = href; value.target = "_blank"; value.rel = "noopener noreferrer";
-    value.onclick = () => logEvent("original_opened", c.source_id); }
-  row.append(value, document.createTextNode(` ${o.unit || "(unit unavailable)"} · period ${o.period || "unavailable"}${o.entity ? " · " + o.entity : ""}`));
+  value.title = o.entity || o.name;
+  if (href) {
+    value.href = href; value.target = "_blank"; value.rel = "noopener noreferrer";
+    value.onclick = () => logEvent("original_opened", c.source_id);
+  }
+  return value;
+}
+function readableFormula(c) {
+  return c.formula.replace(/[A-Za-z_]\w*/g, (name) => c.operands.find((o) => o.name === name)?.value || name);
+}
+function compactInput(o, box, inherited = {}) {
+  if (o.kind === "constant") return;
+  const row = el("p"); row.className = "input-derivation";
+  const labels = (o.entity || "").split(" · ");
+  const sections = (o.calculation?.operands || []).map((child) => (child.entity || "").split(" · ")[1]).filter(Boolean);
+  const subtotalLabel = sections.length && sections.every((v) => v === sections[0]) ? sections[0].replace(/[:*]+/g, "").trim() : null;
+  const label = labels.length >= 4 ? labels[labels.length - 2] : subtotalLabel || o.name.replace(/_/g, " ");
+  row.append(document.createTextNode(`${label}: `), linkedInput(o),
+    document.createTextNode(`${o.unit && o.unit !== inherited.unit ? " " + o.unit : ""}${o.period && o.period !== inherited.period ? " · " + o.period : ""}`));
+  if (o.calculation) {
+    row.append(document.createTextNode(" = "));
+    // A subtotal expression uses its own operand names; values link to exact leaves below.
+    row.append(document.createTextNode(readableFormula(o.calculation)));
+  }
   box.append(row);
-  if (o.kind === "constant") box.append(el("p", "Mathematical constant: " + o.value));
-  else if (o.calculation) renderCalculation(o.calculation, box, preview);
-  else if (!c || c.status !== "located") {
-    box.append(el("p", `No source located for input ${o.name}`));
-    if (c) {
-      box.append(el("p", `${c.status}: ${c.reason}`));
-      const source = bundle.sources.find((s) => s.source_id === c.source_id);
-      if (source && Number.isInteger(c.start_line) && c.start_line >= 1 && c.end_line >= c.start_line && c.end_line <= source.text.split("\n").length) {
-        const href = (evidence.links || {})[c.source_id]?.line_url ? originalHref(c.source_id, "", c.start_line, c.end_line) : null;
-        const inspect = el(href ? "a" : "button", "Inspect candidate range");
-        if (href) { inspect.href = href; inspect.target = "_blank"; inspect.rel = "noopener noreferrer"; }
-        else inspect.onclick = () => { $("evidence").replaceChildren(); showSource(source, c.start_line, c.end_line); };
-        box.append(inspect, el("small", "Candidate range only; excerpt mismatch or unresolved evidence is preserved. This is not an exact matching datapoint."));
-      }
+  if (o.calculation) o.calculation.operands.forEach((child) => compactInput(child, box, o));
+  else if (o.citation?.status === "located") {
+    const preview = el("button", "Preview");
+    preview.setAttribute("aria-label", "Preview input " + label);
+    preview.className = "preview-link";
+    preview.onclick = () => { $("evidence-panel").open = true; $("evidence").replaceChildren(); cite(o.citation); };
+    row.append(preview);
+  } else {
+    const c = o.citation;
+    row.append(document.createTextNode(" · source unresolved"));
+    const source = c && bundle.sources.find((s) => s.source_id === c.source_id);
+    if (source && Number.isInteger(c.start_line) && c.start_line >= 1 && c.end_line >= c.start_line && c.end_line <= source.text.split("\n").length) {
+      const href = (evidence.links || {})[c.source_id]?.line_url ? originalHref(c.source_id, "", c.start_line, c.end_line) : null;
+      const inspect = el(href ? "a" : "button", "Inspect candidate range");
+      if (href) { inspect.href = href; inspect.target = "_blank"; inspect.rel = "noopener noreferrer"; }
+      else inspect.onclick = () => { $("evidence-panel").open = true; $("evidence").replaceChildren(); showSource(source, c.start_line, c.end_line); };
+      row.append(inspect);
     }
   }
-  else if (preview) cite(c, box);
-  else {
-    const p = el("button", "Preview input " + o.name);
-    p.onclick = () => { $("evidence-panel").open = true; $("evidence").replaceChildren(); cite(c); };
-    box.append(p);
-  }
 }
-function renderCalculation(c, box, preview = false) {
+function calculationTechnical(c, box) {
   const r = c.recomputation || { status: "unresolved" };
-  box.append(el("h4", "Calculation"), el("p", `Formula: ${c.formula}`),
+  box.append(el("p", `Formula: ${c.formula}`),
     el("p", `Reported result: ${c.result} ${c.unit}`), el("p", `Absolute tolerance: ${c.tolerance} ${c.unit}`));
-  c.operands.forEach((o) => operandValue(o, box, preview));
-  // Raw literals may be financial inputs. Only explicit constant operands establish constants.
-  const namesRemoved = c.formula.replace(/[A-Za-z_]\w*/g, "");
-  const constants = [...new Set(namesRemoved.match(/\d+(?:\.\d+)?/g) || [])];
+  const constants = [...new Set(c.formula.replace(/[A-Za-z_]\w*/g, "").match(/\d+(?:\.\d+)?/g) || [])];
   constants.forEach((v) => box.append(el("p", "Formula literal (source association not established): " + v)));
+  c.operands.filter((o) => o.kind === "constant").forEach((o) => box.append(el("p", "Mathematical constant: " + o.value)));
   (c.conversions || []).forEach((v) => box.append(el("p", "Conversion: " + v)));
   box.append(el("p", r.status === "unresolved" ? `Arithmetic unresolved: ${r.reason || "cannot recompute"}`
     : `Recomputed (Decimal): ${r.result} · arithmetic ${r.status} · discrepancy ${r.discrepancy}`));
@@ -439,16 +472,48 @@ function renderCalculation(c, box, preview = false) {
       ? "Input evidence: every input has a located citation."
       : `Input evidence unresolved: no located citation for ${r.evidence.missing.join(", ")}.`));
     r.evidence.warnings.forEach((w) => box.append(el("p", "Warning: " + w)));
-    box.append(el("p", r.evidence.note));
   }
-  box.append(el("p", "Arithmetic agreement does not verify input selection or interpretation."));
+}
+function renderCalculation(c, box, preview = false, inputs = c.operands, checks = true) {
+  box.append(el("p", `${readableFormula(c)} → reported ${c.result} ${c.unit}`));
+  inputs.forEach((o) => compactInput(o, box));
+  if (checks) {
+    const details = el("details"); details.append(el("summary", "Calculation checks"));
+    calculationTechnical(c, details); box.append(details);
+  }
+}
+function renderNumberCalculation(span, box, preview = false) {
+  const prepared = (span.prepared_evidence || []).filter((p) => p.calculation);
+  if (prepared.length) {
+    box.append(el("h4", "Prepared calculation (independent)"));
+    prepared.forEach((p) => renderCalculation(p.calculation, box, preview));
+  } else {
+    if (span.prepared_inputs?.length) box.append(el("h4", "Located inputs (independent)"));
+    const inputs = span.calculation.operands.map((o) => (span.prepared_inputs || []).find((p) => p.name === o.name) || o);
+    renderCalculation(span.calculation, box, preview, inputs, false);
+  }
+  const issues = (span.diagnostics?.candidate || []).filter((d) => d.outcome !== "consistent");
+  // Older bundles still expose bad candidate citations without a diagnostic sidecar.
+  if (!span.diagnostics) span.calculation.operands.forEach((o) => {
+    if (o.citation?.status !== "located" && o.kind !== "constant") issues.push({scope: "candidate_input", input_path: [o.name], reason: o.citation?.reason || "source unresolved"});
+  });
+  const seen = new Set();
+  issues.forEach((d) => {
+    const scope = d.scope === "candidate_arithmetic" ? "Candidate arithmetic" : "Candidate citation";
+    const reason = d.scope === "candidate_arithmetic" ? "differs from the reported result; see checks" : d.citation?.status === "excerpt_mismatch" ? "excerpt does not match cited rows" : d.reason;
+    const text = `${scope}${d.input_path?.length ? " (" + d.input_path.join(" / ") + ")" : ""}: ${reason}`;
+    if (!seen.has(text)) { box.append(el("p", text)); seen.add(text); }
+  });
+  const original = el("details"); original.append(el("summary", "Original candidate calculation"));
+  calculationTechnical(span.calculation, original); box.append(original);
+  renderDiagnostics(span, box);
 }
 function renderDiagnostics(span, box) {
   const d = span.diagnostics;
   if (!d) return;
-  const panel = el("section"); panel.className = "number-diagnostics";
-  panel.append(el("h4", "Technical diagnostics"),
-    el("p", "Independent preparation: " + d.preparation_status),
+  const panel = el("details"); panel.className = "number-diagnostics";
+  panel.append(el("summary", "Technical diagnostics"));
+  panel.append(el("p", "Independent preparation: " + d.preparation_status),
     el("p", "Location and arithmetic checks do not decide support, defects or materiality."));
   function issue(x) {
     const scope = {candidate_citation: "Candidate citation", candidate_input: "Candidate input", candidate_arithmetic: "Candidate arithmetic", preparation: "Preparation limitation"}[x.scope];
@@ -478,16 +543,13 @@ function renderDiagnostics(span, box) {
   box.append(panel);
 }
 function showCalculation(span, anchor) {
+  const claims = span.claim_ids.filter((id) => bundle.claims.some((c) => c.claim_id === id));
+  subject = claims.length === 1 ? claims[0] : null;
+  selection = null;
   document.querySelectorAll(".calculation-card").forEach((n) => n.remove());
   const card = el("aside"); card.className = "calculation-card";
   card.setAttribute("role", "region"); card.setAttribute("aria-label", "Calculation details");
-  renderDiagnostics(span, card);
-  (span.prepared_evidence || []).forEach((p) => {
-    card.append(el("h4", "Prepared calculation"), el("p", "Prepared for review; not supplied by the answer."), el("p", p.reason));
-    if (p.calculation) renderCalculation(p.calculation, card);
-  });
-  card.append(el("h4", "Original candidate calculation"));
-  renderCalculation(span.calculation, card);
+  renderNumberCalculation(span, card);
   const preview = el("button", "Preview calculation evidence");
   preview.onclick = () => showSpan(span, false);
   const close = el("button", "Close calculation details"); close.onclick = () => { card.remove(); anchor.focus(); };
@@ -529,6 +591,15 @@ function linkedStatement(text, subjectId) {
 function showSpan(span, follow = true) {
   $("evidence-panel").open = true;
   logEvent("span_opened", span.span_id);
+  if (span.calculation) {
+    const claims = span.claim_ids.filter((id) => bundle.claims.some((c) => c.claim_id === id));
+    subject = claims.length === 1 ? claims[0] : null;
+    selection = null;
+    if (subject && follow) followSubject(subject);
+    $("evidence").replaceChildren(el("h3", span.text));
+    renderNumberCalculation(span, $("evidence"), true);
+    return;
+  }
   const contextLine = () => {
     if (!span.context) return;
     const c = span.context;
@@ -637,6 +708,8 @@ function renderReport() {
       offset = s.end;
     });
     p.append(document.createTextNode(chars.slice(offset).join("")));
+    p.dataset.savedText = f.text;
+    p.dataset.claimIds = JSON.stringify(f.claim_ids || []);
     report.append(p);
   });
 }
@@ -691,15 +764,18 @@ function goTo(fieldId, focus = true) {
   renderForms();
   if (focus) $("field-" + fieldId)?.focus();
 }
-function claimLinks(f, div) {
-  // Coverage may rest on several claims; show their text, not bare identifiers.
-  const box = el("fieldset");
-  box.append(el("legend", "Claims that address this item (choose all that apply)"));
+function claimLinks(f) {
+  // Select alongside the exact saved claim, while the issue stays in its own pane.
+  document.querySelectorAll(".claim-choice").forEach((node) => node.remove());
+  if (!f || !isReference(f.subject_id)) return;
   bundle.claims.forEach((c) => {
+    const target = [...$("report").querySelectorAll(".report-text")]
+      .find((node) => node.dataset.savedText === c.text && JSON.parse(node.dataset.claimIds).includes(c.claim_id));
     const l = el("label");
     l.className = "claim-choice";
     const check = el("input");
     check.type = "checkbox";
+    check.setAttribute("aria-label", `${c.claim_id}: ${c.text}`);
     check.checked = (answers.judgments[f.field_id]?.claim_ids || []).includes(c.claim_id);
     check.onchange = () => {
       const j = judgment(f.field_id);
@@ -708,10 +784,13 @@ function claimLinks(f, div) {
         : j.claim_ids.filter((id) => id !== c.claim_id);
       save();
     };
-    l.append(check, document.createTextNode(` ${c.claim_id}: ${short(c.text)}`));
-    box.append(l);
+    l.append(check, document.createTextNode(` ${c.claim_id} addresses this issue`));
+    if (target) target.before(l);
+    else {
+      l.append(linkedStatement(c.text, c.claim_id));
+      $("report").append(l);
+    }
   });
-  div.append(box);
 }
 function fieldControl(f, div) {
   let control;
@@ -737,7 +816,9 @@ function fieldControl(f, div) {
     const dl = el("dl");
     dl.className = "option-help";
     meanings.forEach(([option, text]) => dl.append(el("dt", option), el("dd", text)));
-    div.append(dl);
+    const definitions = el("details");
+    definitions.append(el("summary", "Judgment definitions"), dl);
+    div.append(definitions);
   }
   const label = el("label", f.label + (f.required ? " *" : ""));
   control.id = "field-" + f.field_id;
@@ -770,7 +851,8 @@ function fieldControl(f, div) {
     progress();
   };
   div.append(note);
-  if (f.subject_id && isReference(f.subject_id)) claimLinks(f, div);
+  if (f.subject_id && isReference(f.subject_id))
+    div.append(el("p", "Select the claims that address this issue in the report pane."));
   const attach = el("button", "Attach selected source passage");
   attach.onclick = () => {
     if (!selection) {
@@ -818,25 +900,50 @@ function progress() {
   const button = $("next-item");
   if (button) button.textContent = next ? "Next unanswered item" : "Go to finish";
 }
+function showSubmissionBlockers() {
+  const box = $("submission-blockers");
+  const pending = bundle.form.filter((f) => f.required && !answered(f));
+  box.replaceChildren(el("p", `${pending.length} fields need attention before submission. Your decisions are unchanged.`));
+  pending.forEach((f) => {
+    const j = answers.judgments[f.field_id];
+    const note = j && f.note_required_unless.length && !f.note_required_unless.includes(j.value) && !j.note.trim();
+    const b = el("button", `${note ? "Add explanation" : "Complete field"}: ${f.label}`);
+    b.onclick = () => {
+      box.hidden = true;
+      if (f.subject_id) goTo(f.field_id);
+      else $("field-" + f.field_id)?.focus();
+      if (note) document.querySelector(`[aria-label="Explanation: ${CSS.escape(f.label)}"]`)?.focus();
+    };
+    box.append(b);
+  });
+  box.hidden = !pending.length;
+  if (pending.length) box.scrollIntoView({ block: "nearest" });
+}
 function renderForms() {
   const items = itemFields();
   if (current === null || !items.some((f) => f.field_id === current))
     current = (items.find((f) => !answered(f)) || items[0] || {}).field_id ?? null;
-  const evidencePanel = $("evidence-panel"); evidencePanel.remove();
+  $("item-links").replaceChildren();
+  claimLinks(bundle.form.find((f) => f.field_id === current));
   $("items").replaceChildren();
   items.forEach((f, i) => {
     const item = subjectOf(f);
     const div = el("div");
     div.className = "item" + (answered(f) ? " answered" : "");
     if (f.field_id !== current) {
+      const j = answers.judgments[f.field_id];
+      const saved = j && j.value !== "";
+      const pending = j && f.note_required_unless.length && !f.note_required_unless.includes(j.value) && !j.note.trim()
+        ? "needs explanation" : "incomplete";
+      const state = answered(f) ? "answered" : saved ? `selected · ${pending}` : "unanswered";
       const open = el(
         "button",
-        `${i + 1}. ${f.label} · ${answered(f) ? "answered" : "unanswered"}${item ? " · " + short(item.text, 70) : ""}`,
+        `${i + 1}. ${f.label} · ${state}${item ? " · " + short(item.text, 70) : ""}`,
       );
       open.className = "item-link";
       open.onclick = () => goTo(f.field_id);
       div.append(open);
-      $("items").append(div);
+      $("item-links").append(div);
       return;
     }
     div.classList.add("current");
@@ -847,7 +954,6 @@ function renderForms() {
       div.append(linkedStatement(item.text, f.subject_id));
       div.append(el("small", isReference(f.subject_id) ? "Coverage: decide whether the answer addresses this reference." : "Evidence support: decide whether the source supports the statement as written."));
     }
-    div.append(evidencePanel);
     fieldControl(f, div);
     const nav = el("div");
     nav.className = "item-nav";
@@ -865,7 +971,6 @@ function renderForms() {
     div.append(nav);
     $("items").append(div);
   });
-  if (!items.length) $("items").append(evidencePanel);
   $("forms").replaceChildren();
   bundle.form
     .filter((f) => !f.subject_id)
@@ -972,12 +1077,12 @@ function render() {
   }
   renderReport();
   const guide = $("resource-guide"); guide.replaceChildren(el("h2", "Resource guide"));
-  guide.append(el("p", "Sources remain the authority. The exact saved answer appears below as its original summary, structured statements and qualifications. Candidate citations and formulas preserve missing or invalid evidence. Number links expose inputs and deterministic arithmetic; prepared evidence is separately attributed and is not a support verdict."));
+  guide.append(el("p", "Sources remain the authority. The exact saved answer appears in the response pane as its original summary, structured statements and qualifications. Candidate citations and formulas preserve missing or invalid evidence. Number links expose inputs and deterministic arithmetic; prepared evidence is separately attributed and is not a support verdict."));
   guide.append(el("h3", "Every eligible frozen source"));
   bundle.sources.forEach((s) => {
     const row = el("p", `${s.title} · type: ${s.metadata.document_type || s.metadata.type || s.metadata.kind || "not supplied"} · period: ${s.metadata.period || "not supplied"} · SHA-256 ${s.sha256}`);
     const preview = el("button", "Full frozen preview: " + s.title);
-    preview.onclick = () => { $("evidence").replaceChildren(); showSource(s); };
+    preview.onclick = () => { $("resource-dialog").close(); $("evidence").replaceChildren(); showSource(s); };
     row.append(preview); guide.append(row);
   });
   guide.append(el("h3", "Reference verification status"), el("p", "A reference checklist is not gold truth. Verification is not established unless explicitly supplied in task context; check its evidence against the frozen sources."));
@@ -1003,7 +1108,7 @@ function render() {
   renderForms();
   const first = bundle.form.find((f) => f.field_id === current);
   if (first && subjectOf(first)) showSubject(subjectOf(first), first.subject_id, false);
-  $("evidence-panel").open = false;
+  $("evidence-panel").open = true;
   renderDefects();
   $("subjects").replaceChildren();
   [...bundle.claims, ...bundle.references].forEach((c) => {
@@ -1040,6 +1145,10 @@ async function load() {
   queue = Promise.resolve();
   render();
 }
+$("open-guide").onclick = () => $("review-guide").showModal();
+$("close-guide").onclick = () => $("review-guide").close();
+$("open-resources").onclick = () => $("resource-dialog").showModal();
+$("close-resources").onclick = () => $("resource-dialog").close();
 $("assessor").oninput = () =>
   sessionStorage.setItem("assessor", $("assessor").value.trim());
 $("add-defect").onclick = () => {
