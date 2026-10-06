@@ -351,7 +351,10 @@ function cite(c, box = $("evidence")) {
     const raw = el("details");
     raw.append(el("summary", "Original numbered lines (raw fallback)"));
     const ctx = el("div"); ctx.className = "context";
-    view.lines.forEach((row) => {
+    const rawLines = view.table?.reason !== "not a table" && view.table?.lines
+      ? view.table.lines.map((row) => ({...row, role: view.lines.find((r) => r.line === row.line)?.role || "context"}))
+      : view.lines;
+    rawLines.forEach((row) => {
       const label = {cited: "cited", table_header: "table header", note: "note"}[row.role];
       const line = el("div", `L${row.line}${label ? " (" + label + ")" : ""}: ${row.text}`);
       line.className = "ctx " + row.role; ctx.append(line);

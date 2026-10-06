@@ -200,3 +200,23 @@ def test_resource_guide_lists_every_frozen_source_and_reference_status(tmp_path)
             expect(page.get_by_role('region', name='Evidence', exact=True)).to_contain_text(source.text.splitlines()[0])
         expect(page.get_by_label(SUPPORT, exact=True)).to_have_value('')
         browser.close()
+
+
+def test_unparsed_multirow_table_preview_retains_all_column_headers(tmp_path):
+    from evidence_review.contracts import Citation, digest
+    b=bound_bundle()
+    rows=['Issuer', '| | Quarter | Quarter | Year | Year |', '| --- | --- | --- | --- | --- |', '| | 2025 | 2024 | 2025 | 2024 |']
+    rows += [f'| Row {i} | 1 | 2 | 3 | 4 |' for i in range(12)]
+    rows += ['| Margin | 24.6% | 22.8% | 24.6% | 22.8% |']
+    b.sources[0].text='\n'.join(rows);b.sources[0].sha256=digest(b.sources[0].text)
+    c=Citation(source_id='filing',start_line=17,end_line=17,excerpt='24.6%',status='located')
+    b.claims[0].citations=[c]
+    b.claims[0].calculation=None
+    for s in b.spans:
+        s.calculation=None
+        s.citations=[c] if s.text=='24.6%' else []
+    with open_review(b,FileStore(tmp_path),launch=False) as h,sync_playwright() as pw:
+        browser=pw.chromium.launch();page=browser.new_page();page.goto(h.url)
+        page.get_by_role('region',name='Report',exact=True).get_by_role('button',name='24.6%, cited',exact=True).click()
+        expect(page.get_by_role('region',name='Evidence',exact=True)).to_contain_text('L4: | | 2025 | 2024 | 2025 | 2024 |')
+        browser.close()
