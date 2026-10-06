@@ -251,6 +251,7 @@ function judgment(id) {
   );
 }
 function showSource(source, start = 1, end = start) {
+  $("evidence-panel").open = true;
   logEvent("source_opened", source.source_id);
   const box = $("evidence");
   const title = el("h3", source.title);
@@ -399,7 +400,17 @@ function operandValue(o, box, preview) {
   else if (o.calculation) renderCalculation(o.calculation, box, preview);
   else if (!c || c.status !== "located") {
     box.append(el("p", `No source located for input ${o.name}`));
-    if (c) box.append(el("p", `${c.status}: ${c.reason}`));
+    if (c) {
+      box.append(el("p", `${c.status}: ${c.reason}`));
+      const source = bundle.sources.find((s) => s.source_id === c.source_id);
+      if (source && Number.isInteger(c.start_line) && c.start_line >= 1 && c.end_line >= c.start_line && c.end_line <= source.text.split("\n").length) {
+        const href = (evidence.links || {})[c.source_id]?.line_url ? originalHref(c.source_id, "", c.start_line, c.end_line) : null;
+        const inspect = el(href ? "a" : "button", "Inspect candidate range");
+        if (href) { inspect.href = href; inspect.target = "_blank"; inspect.rel = "noopener noreferrer"; }
+        else inspect.onclick = () => { $("evidence").replaceChildren(); showSource(source, c.start_line, c.end_line); };
+        box.append(inspect, el("small", "Candidate range only; excerpt mismatch or unresolved evidence is preserved. This is not an exact matching datapoint."));
+      }
+    }
   }
   else if (preview) cite(c, box);
   else {
@@ -413,10 +424,10 @@ function renderCalculation(c, box, preview = false) {
   box.append(el("h4", "Calculation"), el("p", `Formula: ${c.formula}`),
     el("p", `Reported result: ${c.result} ${c.unit}`), el("p", `Absolute tolerance: ${c.tolerance} ${c.unit}`));
   c.operands.forEach((o) => operandValue(o, box, preview));
-  // Literal constants are mathematical factors, never financial source claims.
+  // Raw literals may be financial inputs. Only explicit constant operands establish constants.
   const namesRemoved = c.formula.replace(/[A-Za-z_]\w*/g, "");
   const constants = [...new Set(namesRemoved.match(/\d+(?:\.\d+)?/g) || [])];
-  constants.forEach((v) => box.append(el("p", "Mathematical constant: " + v)));
+  constants.forEach((v) => box.append(el("p", "Formula literal (source association not established): " + v)));
   (c.conversions || []).forEach((v) => box.append(el("p", "Conversion: " + v)));
   box.append(el("p", r.status === "unresolved" ? `Arithmetic unresolved: ${r.reason || "cannot recompute"}`
     : `Recomputed (Decimal): ${r.result} · arithmetic ${r.status} · discrepancy ${r.discrepancy}`));
@@ -433,6 +444,11 @@ function showCalculation(span, anchor) {
   document.querySelectorAll(".calculation-card").forEach((n) => n.remove());
   const card = el("aside"); card.className = "calculation-card";
   card.setAttribute("role", "region"); card.setAttribute("aria-label", "Calculation details");
+  (span.prepared_evidence || []).forEach((p) => {
+    card.append(el("h4", "Prepared calculation"), el("p", "Prepared for review; not supplied by the answer."), el("p", p.reason));
+    if (p.calculation) renderCalculation(p.calculation, card);
+  });
+  card.append(el("h4", "Original candidate calculation"));
   renderCalculation(span.calculation, card);
   const preview = el("button", "Preview calculation evidence");
   preview.onclick = () => showSpan(span, false);
@@ -486,11 +502,11 @@ function showSpan(span, follow = true) {
     span.prepared_evidence.forEach((p) => {
       $("evidence").append(el("p", p.reason));
       p.citations.forEach((c) => cite(c));
-      if (p.calculation) renderCalculation(p.calculation, $("evidence"), true);
+      if (p.calculation) { $("evidence").append(el("h4", "Prepared calculation")); renderCalculation(p.calculation, $("evidence"), true); }
     });
     $("evidence").append(el("h4", "Candidate-supplied evidence"));
     span.citations.forEach((c) => cite(c));
-    if (span.calculation) renderCalculation(span.calculation, $("evidence"), true);
+    if (span.calculation) { $("evidence").append(el("h4", "Original candidate calculation")); renderCalculation(span.calculation, $("evidence"), true); }
     if (!span.citations.length && !span.calculation) $("evidence").append(el("p", "No source located in the answer"));
     return;
   }
@@ -914,6 +930,23 @@ function render() {
     bundle.instructions.split("\n").filter(Boolean).forEach((t) => $("instructions").append(el("p", t)));
   }
   renderReport();
+  const guide = $("resource-guide"); guide.replaceChildren(el("h2", "Resource guide"));
+  guide.append(el("p", "Sources remain the authority. The exact saved answer appears below as its original summary, structured statements and qualifications. Candidate citations and formulas preserve missing or invalid evidence. Number links expose inputs and deterministic arithmetic; prepared evidence is separately attributed and is not a support verdict."));
+  guide.append(el("h3", "Every eligible frozen source"));
+  bundle.sources.forEach((s) => {
+    const row = el("p", `${s.title} · type: ${s.metadata.document_type || s.metadata.type || s.metadata.kind || "not supplied"} · period: ${s.metadata.period || "not supplied"} · SHA-256 ${s.sha256}`);
+    const preview = el("button", "Full frozen preview: " + s.title);
+    preview.onclick = () => { $("evidence").replaceChildren(); showSource(s); };
+    row.append(preview); guide.append(row);
+  });
+  guide.append(el("h3", "Reference verification status"), el("p", "A reference checklist is not gold truth. Verification is not established unless explicitly supplied in task context; check its evidence against the frozen sources."));
+  const refs = el("details"); refs.append(el("summary", `Required-issue / reference checklist (${bundle.references.length})`));
+  bundle.references.forEach((r, i) => refs.append(el("p", `Required issue ${i + 1} (${r.reference_id}): ${r.text}`))); guide.append(refs);
+  const rubric = el("details"); rubric.append(el("summary", "Review rubric and judgment definitions"));
+  bundle.form.forEach((f) => {
+    rubric.append(el("h4", f.label), el("p", f.help));
+    Object.entries(f.option_help || {}).forEach(([option, meaning]) => rubric.append(el("p", `${option}: ${meaning}`)));
+  }); guide.append(rubric);
   const inv = evidence.inventory;
   if (inv) {
     const states = Object.entries(inv.spans_by_state)
