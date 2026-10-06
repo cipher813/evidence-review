@@ -388,49 +388,63 @@ function showSubject(item, id, follow = true) {
       el("p", "No cited evidence; search the frozen sources."),
     );
 }
-function operandValue(o, box, preview) {
-  const row = el("p");
-  row.append(document.createTextNode(`Input ${o.name}: `));
+function linkedInput(o) {
   const c = o.citation;
   const href = c?.status === "located" && (evidence.links || {})[c.source_id]?.line_url
     ? originalHref(c.source_id, c.excerpt, c.start_line, c.end_line) : null;
   const value = el(href ? "a" : "span", o.value);
-  if (href) { value.href = href; value.target = "_blank"; value.rel = "noopener noreferrer";
-    value.onclick = () => logEvent("original_opened", c.source_id); }
-  row.append(value, document.createTextNode(` ${o.unit || "(unit unavailable)"} · period ${o.period || "unavailable"}${o.entity ? " · " + o.entity : ""}`));
+  value.title = o.entity || o.name;
+  if (href) {
+    value.href = href; value.target = "_blank"; value.rel = "noopener noreferrer";
+    value.onclick = () => logEvent("original_opened", c.source_id);
+  }
+  return value;
+}
+function readableFormula(c) {
+  return c.formula.replace(/[A-Za-z_]\w*/g, (name) => c.operands.find((o) => o.name === name)?.value || name);
+}
+function compactInput(o, box, inherited = {}) {
+  if (o.kind === "constant") return;
+  const row = el("p"); row.className = "input-derivation";
+  const labels = (o.entity || "").split(" · ");
+  const sections = (o.calculation?.operands || []).map((child) => (child.entity || "").split(" · ")[1]).filter(Boolean);
+  const subtotalLabel = sections.length && sections.every((v) => v === sections[0]) ? sections[0].replace(/[:*]+/g, "").trim() : null;
+  const label = labels.length >= 4 ? labels[labels.length - 2] : subtotalLabel || o.name.replace(/_/g, " ");
+  row.append(document.createTextNode(`${label}: `), linkedInput(o),
+    document.createTextNode(`${o.unit && o.unit !== inherited.unit ? " " + o.unit : ""}${o.period && o.period !== inherited.period ? " · " + o.period : ""}`));
+  if (o.calculation) {
+    row.append(document.createTextNode(" = "));
+    // A subtotal expression uses its own operand names; values link to exact leaves below.
+    row.append(document.createTextNode(readableFormula(o.calculation)));
+  }
   box.append(row);
-  if (o.kind === "constant") box.append(el("p", "Mathematical constant: " + o.value));
-  else if (o.calculation) renderCalculation(o.calculation, box, preview);
-  else if (!c || c.status !== "located") {
-    box.append(el("p", `No source located for input ${o.name}`));
-    if (c) {
-      box.append(el("p", `${c.status}: ${c.reason}`));
-      const source = bundle.sources.find((s) => s.source_id === c.source_id);
-      if (source && Number.isInteger(c.start_line) && c.start_line >= 1 && c.end_line >= c.start_line && c.end_line <= source.text.split("\n").length) {
-        const href = (evidence.links || {})[c.source_id]?.line_url ? originalHref(c.source_id, "", c.start_line, c.end_line) : null;
-        const inspect = el(href ? "a" : "button", "Inspect candidate range");
-        if (href) { inspect.href = href; inspect.target = "_blank"; inspect.rel = "noopener noreferrer"; }
-        else inspect.onclick = () => { $("evidence").replaceChildren(); showSource(source, c.start_line, c.end_line); };
-        box.append(inspect, el("small", "Candidate range only; excerpt mismatch or unresolved evidence is preserved. This is not an exact matching datapoint."));
-      }
+  if (o.calculation) o.calculation.operands.forEach((child) => compactInput(child, box, o));
+  else if (o.citation?.status === "located") {
+    const preview = el("button", "Preview");
+    preview.setAttribute("aria-label", "Preview input " + label);
+    preview.className = "preview-link";
+    preview.onclick = () => { $("evidence-panel").open = true; $("evidence").replaceChildren(); cite(o.citation); };
+    row.append(preview);
+  } else {
+    const c = o.citation;
+    row.append(document.createTextNode(" · source unresolved"));
+    const source = c && bundle.sources.find((s) => s.source_id === c.source_id);
+    if (source && Number.isInteger(c.start_line) && c.start_line >= 1 && c.end_line >= c.start_line && c.end_line <= source.text.split("\n").length) {
+      const href = (evidence.links || {})[c.source_id]?.line_url ? originalHref(c.source_id, "", c.start_line, c.end_line) : null;
+      const inspect = el(href ? "a" : "button", "Inspect candidate range");
+      if (href) { inspect.href = href; inspect.target = "_blank"; inspect.rel = "noopener noreferrer"; }
+      else inspect.onclick = () => { $("evidence-panel").open = true; $("evidence").replaceChildren(); showSource(source, c.start_line, c.end_line); };
+      row.append(inspect);
     }
   }
-  else if (preview) cite(c, box);
-  else {
-    const p = el("button", "Preview input " + o.name);
-    p.onclick = () => { $("evidence-panel").open = true; $("evidence").replaceChildren(); cite(c); };
-    box.append(p);
-  }
 }
-function renderCalculation(c, box, preview = false) {
+function calculationTechnical(c, box) {
   const r = c.recomputation || { status: "unresolved" };
-  box.append(el("h4", "Calculation"), el("p", `Formula: ${c.formula}`),
+  box.append(el("p", `Formula: ${c.formula}`),
     el("p", `Reported result: ${c.result} ${c.unit}`), el("p", `Absolute tolerance: ${c.tolerance} ${c.unit}`));
-  c.operands.forEach((o) => operandValue(o, box, preview));
-  // Raw literals may be financial inputs. Only explicit constant operands establish constants.
-  const namesRemoved = c.formula.replace(/[A-Za-z_]\w*/g, "");
-  const constants = [...new Set(namesRemoved.match(/\d+(?:\.\d+)?/g) || [])];
+  const constants = [...new Set(c.formula.replace(/[A-Za-z_]\w*/g, "").match(/\d+(?:\.\d+)?/g) || [])];
   constants.forEach((v) => box.append(el("p", "Formula literal (source association not established): " + v)));
+  c.operands.filter((o) => o.kind === "constant").forEach((o) => box.append(el("p", "Mathematical constant: " + o.value)));
   (c.conversions || []).forEach((v) => box.append(el("p", "Conversion: " + v)));
   box.append(el("p", r.status === "unresolved" ? `Arithmetic unresolved: ${r.reason || "cannot recompute"}`
     : `Recomputed (Decimal): ${r.result} · arithmetic ${r.status} · discrepancy ${r.discrepancy}`));
@@ -439,16 +453,48 @@ function renderCalculation(c, box, preview = false) {
       ? "Input evidence: every input has a located citation."
       : `Input evidence unresolved: no located citation for ${r.evidence.missing.join(", ")}.`));
     r.evidence.warnings.forEach((w) => box.append(el("p", "Warning: " + w)));
-    box.append(el("p", r.evidence.note));
   }
-  box.append(el("p", "Arithmetic agreement does not verify input selection or interpretation."));
+}
+function renderCalculation(c, box, preview = false, inputs = c.operands, checks = true) {
+  box.append(el("p", `${readableFormula(c)} → reported ${c.result} ${c.unit}`));
+  inputs.forEach((o) => compactInput(o, box));
+  if (checks) {
+    const details = el("details"); details.append(el("summary", "Calculation checks"));
+    calculationTechnical(c, details); box.append(details);
+  }
+}
+function renderNumberCalculation(span, box, preview = false) {
+  const prepared = (span.prepared_evidence || []).filter((p) => p.calculation);
+  if (prepared.length) {
+    box.append(el("h4", "Prepared calculation (independent)"));
+    prepared.forEach((p) => renderCalculation(p.calculation, box, preview));
+  } else {
+    if (span.prepared_inputs?.length) box.append(el("h4", "Located inputs (independent)"));
+    const inputs = span.calculation.operands.map((o) => (span.prepared_inputs || []).find((p) => p.name === o.name) || o);
+    renderCalculation(span.calculation, box, preview, inputs, false);
+  }
+  const issues = (span.diagnostics?.candidate || []).filter((d) => d.outcome !== "consistent");
+  // Older bundles still expose bad candidate citations without a diagnostic sidecar.
+  if (!span.diagnostics) span.calculation.operands.forEach((o) => {
+    if (o.citation?.status !== "located" && o.kind !== "constant") issues.push({scope: "candidate_input", input_path: [o.name], reason: o.citation?.reason || "source unresolved"});
+  });
+  const seen = new Set();
+  issues.forEach((d) => {
+    const scope = d.scope === "candidate_arithmetic" ? "Candidate arithmetic" : "Candidate citation";
+    const reason = d.scope === "candidate_arithmetic" ? "differs from the reported result; see checks" : d.citation?.status === "excerpt_mismatch" ? "excerpt does not match cited rows" : d.reason;
+    const text = `${scope}${d.input_path?.length ? " (" + d.input_path.join(" / ") + ")" : ""}: ${reason}`;
+    if (!seen.has(text)) { box.append(el("p", text)); seen.add(text); }
+  });
+  const original = el("details"); original.append(el("summary", "Original candidate calculation"));
+  calculationTechnical(span.calculation, original); box.append(original);
+  renderDiagnostics(span, box);
 }
 function renderDiagnostics(span, box) {
   const d = span.diagnostics;
   if (!d) return;
-  const panel = el("section"); panel.className = "number-diagnostics";
-  panel.append(el("h4", "Technical diagnostics"),
-    el("p", "Independent preparation: " + d.preparation_status),
+  const panel = el("details"); panel.className = "number-diagnostics";
+  panel.append(el("summary", "Technical diagnostics"));
+  panel.append(el("p", "Independent preparation: " + d.preparation_status),
     el("p", "Location and arithmetic checks do not decide support, defects or materiality."));
   function issue(x) {
     const scope = {candidate_citation: "Candidate citation", candidate_input: "Candidate input", candidate_arithmetic: "Candidate arithmetic", preparation: "Preparation limitation"}[x.scope];
@@ -481,13 +527,7 @@ function showCalculation(span, anchor) {
   document.querySelectorAll(".calculation-card").forEach((n) => n.remove());
   const card = el("aside"); card.className = "calculation-card";
   card.setAttribute("role", "region"); card.setAttribute("aria-label", "Calculation details");
-  renderDiagnostics(span, card);
-  (span.prepared_evidence || []).forEach((p) => {
-    card.append(el("h4", "Prepared calculation"), el("p", "Prepared for review; not supplied by the answer."), el("p", p.reason));
-    if (p.calculation) renderCalculation(p.calculation, card);
-  });
-  card.append(el("h4", "Original candidate calculation"));
-  renderCalculation(span.calculation, card);
+  renderNumberCalculation(span, card);
   const preview = el("button", "Preview calculation evidence");
   preview.onclick = () => showSpan(span, false);
   const close = el("button", "Close calculation details"); close.onclick = () => { card.remove(); anchor.focus(); };
@@ -529,6 +569,15 @@ function linkedStatement(text, subjectId) {
 function showSpan(span, follow = true) {
   $("evidence-panel").open = true;
   logEvent("span_opened", span.span_id);
+  if (span.calculation) {
+    const claims = span.claim_ids.filter((id) => bundle.claims.some((c) => c.claim_id === id));
+    subject = claims.length === 1 ? claims[0] : null;
+    selection = null;
+    if (subject && follow) followSubject(subject);
+    $("evidence").replaceChildren(el("h3", span.text));
+    renderNumberCalculation(span, $("evidence"), true);
+    return;
+  }
   const contextLine = () => {
     if (!span.context) return;
     const c = span.context;

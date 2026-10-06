@@ -394,6 +394,13 @@
             }
           ],
           "default": null
+        },
+        "prepared_inputs": {
+          "items": {
+            "$ref": "#/$defs/Operand"
+          },
+          "title": "Prepared Inputs",
+          "type": "array"
         }
       },
       "required": [
