@@ -92,7 +92,8 @@ def test_prepared_inputs_require_a_source_leaf_not_only_constants(derived):
     with pytest.raises(ValidationError): ReviewBundle.model_validate(raw)
 
 
-def test_calculation_preview_resets_prior_claim_and_selected_passage(tmp_path):
+@pytest.mark.parametrize("preview_kind", ["calculation", "input"])
+def test_calculation_preview_resets_prior_claim_and_selected_passage(tmp_path, preview_kind):
     from evidence_review import FileStore, open_review
     from playwright.sync_api import sync_playwright, expect
     raw = margin_bundle().model_dump(mode='json')
@@ -109,7 +110,7 @@ def test_calculation_preview_resets_prior_claim_and_selected_passage(tmp_path):
         row = page.get_by_role('button', name='L6:', exact=False)
         row.click(); row.click()
         page.get_by_role('region', name='Report', exact=True).get_by_role('button', name='180 bps, derived', exact=True).click()
-        page.get_by_role('button', name='Preview calculation evidence', exact=True).click()
+        page.get_by_role('button', name='Preview calculation evidence' if preview_kind == 'calculation' else 'Preview input current', exact=True).click()
         page.get_by_role('button', name='Add defect', exact=True).click()
         expect(page.locator('#status')).to_contain_text('revision 1')
         defect = store.load_task(b.bundle_id)['answers']['defects'][0]

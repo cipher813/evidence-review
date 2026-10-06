@@ -524,6 +524,9 @@ function renderDiagnostics(span, box) {
   box.append(panel);
 }
 function showCalculation(span, anchor) {
+  const claims = span.claim_ids.filter((id) => bundle.claims.some((c) => c.claim_id === id));
+  subject = claims.length === 1 ? claims[0] : null;
+  selection = null;
   document.querySelectorAll(".calculation-card").forEach((n) => n.remove());
   const card = el("aside"); card.className = "calculation-card";
   card.setAttribute("role", "region"); card.setAttribute("aria-label", "Calculation details");
