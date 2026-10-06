@@ -10,6 +10,7 @@
     <header>
       <h1>Evidence Review</h1>
       <p id="task"></p>
+      <div id="workload" aria-label="Assigned workload"></div>
       <label>Assessor <input id="assessor" autocomplete="name" /></label>
       <p id="status" role="status" aria-live="polite" aria-label="Local save status">
         Loading…
@@ -32,7 +33,7 @@
         </div>
         <h2>Answer under review</h2>
         <p class="legend">
-          Numbers are buttons. <span class="number">Mapped</span>
+          Reported numbers open exact source lines when located. Derived numbers show their formula. Preview evidence keeps you here. <span class="number">Mapped</span>
           <span class="number direct">Opens its source line</span>
           <span class="number unresolved">Unresolved</span>
           <span class="number identifier">Date or identifier</span>
@@ -43,7 +44,13 @@
           <div id="subjects"></div>
         </details>
       </section>
-      <section aria-label="Evidence">
+      <section aria-label="Judgments">
+        <h2>Your current judgment</h2>
+        <p>You are checking a sample of answers to measure whether the automated grader can be trusted. Open the evidence, decide whether it supports this statement, then record your judgment.</p>
+        <p id="progress" role="status" aria-live="polite" aria-label="Review progress"></p>
+        <details id="evidence-panel">
+        <summary>Preview evidence and search frozen sources</summary>
+        <section aria-label="Evidence">
         <h2>Evidence</h2>
         <p>Arithmetic and excerpt matching do not establish factual support.</p>
         <div id="evidence"></div>
@@ -53,10 +60,8 @@
           <summary>All frozen sources</summary>
           <div id="sources"></div>
         </details>
-      </section>
-      <section aria-label="Judgments">
-        <h2>Your judgments</h2>
-        <p id="progress" role="status" aria-live="polite" aria-label="Review progress"></p>
+        </section>
+      </details>
         <div id="items"></div>
         <h3>Finish</h3>
         <div id="forms"></div>

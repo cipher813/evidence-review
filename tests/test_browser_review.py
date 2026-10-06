@@ -12,7 +12,7 @@ CHOICES = ["supported", "partially supported", "unsupported", "contradicted", "c
 
 
 def margin_bundle(prior=None, text=TABLE):
-    return build(
+    b = build(
         [
             ("summary", "Operating margin rose 180 bps to 24.6%.", ["margin"]),
             ("qualifications", "Revenue figures exclude 1 disposed segment.", []),
@@ -25,6 +25,11 @@ def margin_bundle(prior=None, text=TABLE):
             FormField(field_id="report_complete", label="I reviewed the full report.", kind="boolean", require_true=True),
         ],
     )
+    for n in b.spans:
+        if n.text == "180 bps": n.calculation = b.claims[0].calculation
+        elif n.text == "24.6%": n.citations = [b.claims[0].citations[-1]]
+    return b.model_validate(b.model_dump(mode="json"))
+
 
 
 def launch(pw):
@@ -38,12 +43,14 @@ def test_operand_context_and_missing_prior_stay_unresolved(tmp_path):
         expect(page.locator("#status")).to_contain_text("Saved locally")
         report = page.get_by_role("region", name="Report")
         expect(report).to_contain_text("subjects with unresolved evidence: margin")
-        page.get_by_role("button", name="180 bps, derived", exact=True).click()
+        page.get_by_role("region", name="Report", exact=True).get_by_role("button", name="180 bps, derived", exact=True).click()
+        page.get_by_role("button", name="Preview calculation evidence", exact=True).click()
         evidence = page.get_by_role("region", name="Evidence")
         expect(evidence).to_contain_text("L4 (table header): | Metric | FY2025 | FY2026 |")
         expect(evidence).to_contain_text("L6 (cited): | Operating margin | 22.8% | 24.6% |")
         expect(evidence).to_contain_text("L8 (note): (1) Revenue restated")
-        expect(evidence).to_contain_text("Recomputed (Decimal): 180.0 · arithmetic match")
+        expect(evidence).to_contain_text("Arithmetic unresolved: Unresolved input evidence: prior")
+        expect(evidence).not_to_contain_text("Recomputed (Decimal)")
         expect(evidence).to_contain_text("Input evidence unresolved: no located citation for prior.")
         expect(evidence).to_contain_text("unavailable: operand not found in frozen sources")
         expect(evidence).to_contain_text("do not establish that the claim is supported")
@@ -92,7 +99,7 @@ def test_keyboard_only_review_and_narrow_zoom(tmp_path):
         page.keyboard.press("Tab")
         assert page.evaluate("document.activeElement.id") == "assessor"
         page.keyboard.type("Keyboard reviewer")
-        number = page.get_by_role("button", name="180 bps, derived", exact=True)
+        number = page.get_by_role("region", name="Report", exact=True).get_by_role("button", name="180 bps, derived", exact=True)
         for _ in range(10):
             page.keyboard.press("Tab")
             if page.evaluate("document.activeElement.getAttribute('aria-label')") == "180 bps, derived":
@@ -100,6 +107,8 @@ def test_keyboard_only_review_and_narrow_zoom(tmp_path):
         else:
             raise AssertionError("number button not reachable by Tab")
         assert number.evaluate("n => getComputedStyle(n).outlineStyle") == "solid"
+        page.keyboard.press("Enter")
+        page.get_by_role("button", name="Preview calculation evidence", exact=True).focus()
         page.keyboard.press("Enter")
         expect(page.get_by_role("region", name="Evidence")).to_contain_text("Formula: (current - prior) * 100")
         page.locator("body").click(position={"x": 1, "y": 1})
@@ -147,6 +156,7 @@ def test_independent_browser_traffic_carries_no_blinded_marker(tmp_path):
         page.get_by_label(SUPPORT, exact=True).select_option("supported")
         page.get_by_label("I reviewed the full report.", exact=True).check()
         expect(page.locator("#status")).to_contain_text("revision 2")
+        page.locator("#evidence-panel > summary").click()
         page.get_by_label("Search frozen sources (press /)").fill("script")
         page.get_by_role("button", name="Synthetic filing L11", exact=False).first.click()
         page.get_by_role("button", name="Submit review", exact=True).click()
@@ -171,7 +181,7 @@ def test_citations_link_to_the_original_lines_and_unresolved_numbers_search(tmp_
         page = launch(pw).new_page()
         page.goto(h.url)
         expect(page.locator("#status")).to_contain_text("Saved locally")
-        page.get_by_role("button", name="24.6%, cited", exact=True).click()
+        page.get_by_role("region", name="Report", exact=True).get_by_role("button", name="Preview evidence for 24.6%", exact=True).click()
         evidence = page.get_by_role("region", name="Evidence")
         link = evidence.get_by_role("link", name="Open in source repo, L6").first
         assert link.get_attribute("href") == base + "#L6-L6"
@@ -184,7 +194,7 @@ def test_citations_link_to_the_original_lines_and_unresolved_numbers_search(tmp_
     with open_review(margin_bundle(), FileStore(tmp_path / "nolinks"), launch=False) as h, sync_playwright() as pw:
         page = launch(pw).new_page()
         page.goto(h.url)
-        page.get_by_role("button", name="24.6%, cited", exact=True).click()
+        page.get_by_role("region", name="Report", exact=True).get_by_role("button", name="24.6%, cited", exact=True).click()
         expect(page.get_by_role("region", name="Evidence")).to_contain_text("No public original is recorded")
 
 
@@ -221,10 +231,12 @@ def test_bound_numbers_open_their_line_and_calculations_link_every_input(tmp_pat
         with page.context.expect_page() as opened:
             direct.click()
         assert opened.value.url.startswith("https://github.com/o/r/blob/abc/doc.md")
+        report.get_by_role("button", name="Preview evidence for 24.6%", exact=True).click()
         evidence = page.get_by_role("region", name="Evidence")
         expect(evidence).to_contain_text("24.6%: cited")
         expect(evidence.get_by_role("button", name="Whole claim margin")).to_be_visible()
-        page.get_by_role("button", name="180 bps, derived", exact=True).click()
+        page.get_by_role("region", name="Report", exact=True).get_by_role("button", name="180 bps, derived", exact=True).click()
+        page.get_by_role("button", name="Preview calculation evidence", exact=True).click()
         expect(evidence).to_contain_text("180 bps: calculated")
         expect(evidence).to_contain_text("Formula: (current - prior) * 100")
         inputs = evidence.get_by_role("link", name="Open in source repo, L6")

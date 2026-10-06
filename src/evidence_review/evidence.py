@@ -147,16 +147,27 @@ def validate_citation(citation, sources):
 
 def operand_evidence(operands, unit, conversions):
     """Report what evidence exists for each input; never certify support."""
-    missing = [
-        o.name for o in operands if o.citation is None or o.citation.status != "located"
-    ]
-    units = sorted({o.unit for o in operands if o.unit})
+    missing = []
+    for o in operands:
+        if o.kind == "constant":
+            continue
+        if o.kind == "derived":
+            r = o.calculation.recomputation
+            try:
+                agrees = Decimal(o.value) == Decimal(o.calculation.result)
+            except InvalidOperation:
+                agrees = False
+            if r["status"] != "match" or not agrees:
+                missing.append(o.name)
+        elif o.citation is None or o.citation.status != "located":
+            missing.append(o.name)
+    units = sorted({o.unit for o in operands if o.unit and o.kind != "constant"})
     warnings = []
     if not conversions and len(units) > 1:
         warnings.append("operands use different units without a declared conversion")
-    if any(not o.unit for o in operands):
+    if any(not o.unit for o in operands if o.kind != "constant"):
         warnings.append("operand unit unavailable")
-    if any(not o.period for o in operands):
+    if any(not o.period for o in operands if o.kind != "constant"):
         warnings.append("operand period unavailable")
     return {
         "status": "operand_evidence_missing" if missing else "all_operands_cited",
@@ -166,19 +177,30 @@ def operand_evidence(operands, unit, conversions):
     }
 
 
+def calculation_citations(calc):
+    for operand in calc.operands:
+        if operand.citation:
+            yield operand.citation
+        if operand.calculation:
+            yield from calculation_citations(operand.calculation)
+
+
 def evidence_views(bundle):
     """Context for every located citation, keyed source:start:end, for display."""
     sources = {s.source_id: s for s in bundle.sources}
     views = {}
-    for item in [*bundle.claims, *bundle.references, *bundle.spans]:
+    prepared = [p for n in bundle.spans for p in n.prepared_evidence]
+    for item in [*bundle.claims, *bundle.references, *bundle.spans, *prepared]:
         cites = list(item.citations)
         if item.calculation:
-            cites += [o.citation for o in item.calculation.operands if o.citation]
+            cites += list(calculation_citations(item.calculation))
         for c in cites:
             if c.status == "located":
                 key = f"{c.source_id}:{c.start_line}:{c.end_line}"
                 view = passage(sources[c.source_id], c.start_line, c.end_line)
                 view.pop("full_text")
+                from .table_context import table_context
+                view["table"] = table_context(sources[c.source_id], c.start_line, c.end_line)
                 views[key] = view
     return views
 
@@ -197,7 +219,7 @@ def inventory(bundle):
         ident = getattr(item, "claim_id", None) or item.reference_id
         cites = list(item.citations)
         if item.calculation:
-            cites += [o.citation for o in item.calculation.operands if o.citation]
+            cites += list(calculation_citations(item.calculation))
             r = item.calculation.recomputation
             if r.get("status") != "match":
                 failed.append(ident)
@@ -280,3 +302,34 @@ def calculate(formula, values, reported, tolerance):
             "reason": str(exc),
             "evidence_verified": False,
         }
+
+
+def navigation_coverage(bundle, links):
+    """Exposure destinations on this exact served bundle, never support verdicts."""
+    def exact(c):
+        return c.status == 'located' and bool(links.get(c.source_id, {}).get('line_url'))
+
+    asserted = [n for n in bundle.spans if n.state != 'identifier']
+    direct, derived, operands, linked, unresolved = 0, 0, 0, 0, []
+    for n in asserted:
+        if n.calculation:
+            derived += 1
+            for c in calculation_citations(n.calculation):
+                operands += 1
+                linked += exact(c)
+                if not exact(c):
+                    unresolved.append({'span_id': n.span_id, 'reason': c.reason or 'No exact operand source link'})
+            missing = n.calculation.recomputation['evidence']['missing']
+            if missing:
+                unresolved.append({'span_id': n.span_id, 'reason': 'No source located: ' + ', '.join(missing)})
+        elif n.state == 'cited' and len(n.citations) == 1 and exact(n.citations[0]):
+            direct += 1
+        else:
+            unresolved.append({'span_id': n.span_id, 'reason': n.reason or (
+                'Multiple possible sources—no exact match established' if n.state == 'ambiguous'
+                else 'Choose among cited sources' if len(n.citations) > 1
+                else 'No exact source link' if n.citations else 'No source located')})
+    return {'asserted_spans': len(asserted), 'cited_spans': sum(bool(n.citations) for n in asserted),
+            'direct_spans': direct, 'derived_spans': derived, 'cited_operands': operands,
+            'cited_operands_with_links': linked, 'unresolved': unresolved,
+            'evidence_verified': False}

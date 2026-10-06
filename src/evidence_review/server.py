@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 import json
+import hashlib
 import secrets
 import threading
 import webbrowser
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
-from urllib.parse import urlsplit
-from .contracts import blind_terms, blind_violations, validate_bundle
-from .evidence import evidence_views, inventory
+from urllib.parse import urlsplit, parse_qsl
+from .contracts import ReviewWorkload, PACKAGE_VERSION, blind_terms, blind_violations, validate_bundle
+from .evidence import evidence_views, inventory, navigation_coverage
 from .store import Conflict
 from .hooks import Hooks, run_hook
 
@@ -76,13 +77,18 @@ def source_link_map(source_links):
             raise ValueError(f"source link for {source_id} has unknown or non-text fields")
         url = link.get("url", "")
         parts = urlsplit(url)
-        if parts.scheme != "https" or not parts.netloc or parts.fragment:
+        if (parts.scheme != "https" or not parts.netloc or parts.fragment or parts.username or parts.password
+                or any(ord(c) < 33 for c in url)):
             raise ValueError(f"source link for {source_id} needs an https url without a fragment")
         line_url = link.get("line_url", "")
         if line_url:
             filled = line_url.replace("{start}", "1").replace("{end}", "1")
             lp = urlsplit(filled)
-            if lp.scheme != "https" or not lp.netloc or "{start}" not in line_url or "{" in filled or "}" in filled:
+            if (lp.scheme != "https" or not lp.netloc or lp.username or lp.password
+                    or any(ord(c) < 33 for c in line_url) or "{start}" not in line_url
+                    or "{" in filled or "}" in filled
+                    or (lp.scheme, lp.netloc, lp.path) != (parts.scheme, parts.netloc, parts.path)
+                    or not set(parse_qsl(parts.query)).issubset(set(parse_qsl(lp.query)))):
                 raise ValueError(f"source link for {source_id} has an invalid line_url template")
         links[source_id] = {
             "url": url,
@@ -102,6 +108,7 @@ def open_review(
     assessor="",
     blind_markers=(),
     source_links=None,
+    workload=None,
 ):
     """Serve one review task on loopback.
 
@@ -109,12 +116,15 @@ def open_review(
     names, arm codes, judge verdict tokens). Outside adjudication, a bundle or
     API response containing one is refused rather than shown.
 
+    workload may be a callback receiving the active validated bundle, returning
+    current caller-owned display counts. It does not change frozen bundle identity.
+    source_links may likewise be a callback for per-task eligible links.
+
     source_links optionally maps source ids to their public originals (see
     ``source_link_map``); the UI offers each as a link that opens the original
     at the cited passage, so a reviewer can check the frozen copy against it.
     """
     markers = blind_terms(blind_markers)
-    links = source_link_map(source_links)
 
     def checked(b):
         b = validate_bundle(b.model_dump(mode="json") if hasattr(b, "model_dump") else b)
@@ -125,6 +135,17 @@ def open_review(
         return b
 
     bundle = checked(bundle)
+    def links_for(b):
+        return source_link_map(source_links(b) if callable(source_links) else source_links)
+
+    def workload_for(b):
+        value = workload(b) if callable(workload) else workload
+        if value is None:
+            value = b.workload
+        return ReviewWorkload.model_validate(value).model_dump(mode="json") if value is not None else None
+
+    links = [links_for(bundle)]
+    workload_for(bundle)  # Reject invalid initial display metadata before serving.
     store.register(bundle)
     hooks = hooks or Hooks()
     token = secrets.token_urlsafe(32)
@@ -189,15 +210,30 @@ def open_review(
                 if self.path == "/api/bundle":
                     self.response(200, current[0].model_dump(mode="json"))
                 elif self.path == "/api/evidence":
+                    try:
+                        display_workload = workload_for(current[0])
+                    except (ValueError, TypeError) as exc:
+                        self.response(500, {"error": "invalid caller workload: " + str(exc)})
+                        return
                     self.response(
                         200,
                         {
                             "views": views[0],
                             "inventory": inventory(current[0]),
+                            "navigation": navigation_coverage(current[0], links[0]),
+                            "workload": display_workload,
+                            "diagnostics": {
+                                "package_version": PACKAGE_VERSION,
+                                "bundle_hash": current[0].bundle_hash,
+                                "asset_sha256": {
+                                    name: hashlib.sha256(files("evidence_review").joinpath("ui", name).read_bytes()).hexdigest()
+                                    for name, _ in ASSETS.values()
+                                },
+                            },
                             "links": {
-                                s.source_id: links[s.source_id]
+                                s.source_id: links[0][s.source_id]
                                 for s in current[0].sources
-                                if s.source_id in links
+                                if s.source_id in links[0]
                             },
                         },
                     )
@@ -270,7 +306,10 @@ def open_review(
                             return
                         nxt = checked(nxt)
                         store.register(nxt)
+                        next_links = links_for(nxt)
+                        workload_for(nxt)
                         current[0] = nxt
+                        links[0] = next_links
                         views[0] = evidence_views(nxt)
                         self.response(200, {"bundle": nxt.model_dump(mode="json")})
                         return

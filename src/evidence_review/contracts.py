@@ -9,7 +9,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-PACKAGE_VERSION = "0.3.0"
+PACKAGE_VERSION = "0.4.0"
 
 
 def canonical_json(value) -> bytes:
@@ -72,6 +72,19 @@ class Operand(Strict):
     unit: str = ""
     period: str = ""
     citation: Citation | None = None
+    kind: Literal["source", "constant", "derived"] = "source"
+    entity: str = ""
+    calculation: Calculation | None = None
+
+    @model_validator(mode="after")
+    def provenance_kind(self):
+        if self.kind == "constant" and (self.citation or self.calculation):
+            raise ValueError("mathematical constants carry no source evidence")
+        if self.kind == "derived" and (not self.calculation or self.citation):
+            raise ValueError("derived input needs its calculation, not a direct citation")
+        if self.kind == "source" and self.calculation:
+            raise ValueError("source input cannot carry an intermediate calculation")
+        return self
 
 
 class Calculation(Strict):
@@ -88,16 +101,21 @@ class Calculation(Strict):
         from .evidence import calculate, operand_evidence
 
         # Derived on every validation, so a producer cannot supply its own verdict.
-        self.recomputation = {
-            **calculate(
+        arithmetic = calculate(
                 self.formula,
                 {o.name: o.value for o in self.operands},
                 self.result,
                 self.tolerance,
-            ),
-            "evidence": operand_evidence(self.operands, self.unit, self.conversions),
-        }
+            )
+        evidence = operand_evidence(self.operands, self.unit, self.conversions)
+        self.recomputation = {**arithmetic, "evidence": evidence, "arithmetic": arithmetic}
+        if evidence["missing"]:
+            self.recomputation.update(status="unresolved", result=None,
+                                     reason="Unresolved input evidence: " + ", ".join(evidence["missing"]))
         return self
+
+
+Operand.model_rebuild()
 
 
 class Claim(Strict):
@@ -117,6 +135,21 @@ class ReportField(Strict):
     role: Literal["answer", "context"] = "answer"
 
 
+class NumericContext(Strict):
+    metric: str = ""
+    entity: str = ""
+    period: str = ""
+    unit: str = ""
+    status: Literal["resolved", "ambiguous", "unavailable"] = "unavailable"
+
+
+class PreparedEvidence(Strict):
+    origin: Literal["independently_located"] = "independently_located"
+    citations: list[Citation] = Field(default_factory=list)
+    calculation: Calculation | None = None
+    reason: str = ""
+
+
 class NumericSpan(Strict):
     span_id: str
     field_path: str
@@ -132,6 +165,22 @@ class NumericSpan(Strict):
     # source line(s) holding the value, or the calculation and its inputs.
     citations: list[Citation] = Field(default_factory=list)
     calculation: Calculation | None = None
+    context: NumericContext | None = None
+    prepared_evidence: list[PreparedEvidence] = Field(default_factory=list)
+
+
+class ReviewWorkload(Strict):
+    answer_index: int = Field(ge=1)
+    assigned_answers: int = Field(ge=1)
+    task_counts: dict[str, int] = Field(default_factory=dict)
+    assignment_reason: str = ""
+    expansion_conditions: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def counts(self):
+        if self.answer_index > self.assigned_answers or any(v < 0 for v in self.task_counts.values()):
+            raise ValueError("invalid assigned workload counts")
+        return self
 
 
 class ReferenceItem(Strict):
@@ -166,6 +215,7 @@ class ReviewBundle(Strict):
     document_hashes: dict[str, str]
     # What the reviewer is asked to do in this task, in plain language.
     instructions: str = ""
+    workload: ReviewWorkload | None = None
     fields: list[ReportField]
     sources: list[Source]
     spans: list[NumericSpan]
@@ -206,24 +256,32 @@ class ReviewBundle(Strict):
         for n in self.spans:
             if n.state in ("cited", "derived") and not n.claim_ids:
                 raise ValueError("mapped span needs claims")
-            if n.state == "identifier" and (n.citations or n.calculation):
+            if n.state == "identifier" and (n.citations or n.calculation or n.prepared_evidence):
                 raise ValueError("identifier spans carry no evidence")
         context = {f.path for f in self.fields if f.role == "context"}
         for n in self.spans:
             if n.field_path in context and (
-                n.claim_ids or n.citations or n.calculation or n.state != "identifier"
+                n.claim_ids or n.citations or n.calculation or n.prepared_evidence or n.context or n.state != "identifier"
             ):
                 raise ValueError("context numbers are not assertions")
-        for c in [*self.claims, *self.references, *self.spans]:
+        def validate_calc(calc, depth=0):
+            if depth > 12:
+                raise ValueError("intermediate calculation nesting too deep")
+            names = [o.name for o in calc.operands]
+            if len(set(names)) != len(names):
+                raise ValueError("duplicate calculation operand")
+            for operand in calc.operands:
+                if operand.citation:
+                    validate_citation(operand.citation, sources)
+                if operand.calculation:
+                    validate_calc(operand.calculation, depth + 1)
+
+        prepared = [p for n in self.spans for p in n.prepared_evidence]
+        for c in [*self.claims, *self.references, *self.spans, *prepared]:
             for citation in c.citations:
                 validate_citation(citation, sources)
             if c.calculation:
-                names = [o.name for o in c.calculation.operands]
-                if len(set(names)) != len(names):
-                    raise ValueError("duplicate calculation operand")
-                for operand in c.calculation.operands:
-                    if operand.citation:
-                        validate_citation(operand.citation, sources)
+                validate_calc(c.calculation)
         if self.task_kind == "independent" and self.disclosures:
             raise ValueError("independent tasks cannot disclose labels or identity")
         for f in self.form:

@@ -42,9 +42,9 @@ function originalHref(sourceId, excerpt, start, end) {
 }
 // A number bound to exactly one located source line opens that line directly.
 function directCitation(span) {
-  if (span.calculation || span.citations.length !== 1) return null;
+  if (span.state !== "cited" || span.calculation || span.citations.length !== 1) return null;
   const c = span.citations[0];
-  if (c.status !== "located") return null;
+  if (c.status !== "located" || !(evidence.links || {})[c.source_id]?.line_url) return null;
   const href = originalHref(c.source_id, c.excerpt, c.start_line, c.end_line);
   return href ? { citation: c, href } : null;
 }
@@ -307,120 +307,230 @@ function showSource(source, start = 1, end = start) {
   const target = wrap.children[start - 1];
   if (target) target.scrollIntoView({ block: "nearest" });
 }
-function cite(c) {
-  const box = $("evidence");
+function cite(c, box = $("evidence")) {
   box.append(
     el(
       "p",
       `${c.source_id} · ${c.start_line === null ? "unresolved" : `L${c.start_line}–L${c.end_line}`} · ${c.status}${c.reason ? ": " + c.reason : ""}`,
     ),
   );
-  if (c.excerpt) box.append(el("blockquote", c.excerpt));
   const view = evidence.views[`${c.source_id}:${c.start_line}:${c.end_line}`];
-  if (view) {
-    const ctx = el("div");
-    ctx.className = "context";
-    view.lines.forEach((row) => {
-      const label = { cited: "cited", table_header: "table header", note: "note" }[
-        row.role
-      ];
-      const line = el("div", `L${row.line}${label ? " (" + label + ")" : ""}: ${row.text}`);
-      line.className = "ctx " + row.role;
-      ctx.append(line);
+  if (view?.table?.status === "parsed") {
+    const t = view.table;
+    t.context.forEach((r) => box.append(el("p", r.text)));
+    const wrap = el("div");
+    wrap.className = "table-scroll";
+    const table = el("table");
+    table.append(el("caption", "Frozen table context · cited rows highlighted"));
+    const head = el("thead"), hr = el("tr");
+    t.headers.forEach((h) => { const cell = el("th", h); cell.scope = "col"; hr.append(cell); });
+    head.append(hr); table.append(head);
+    const body = el("tbody");
+    const matches = t.rows.flatMap((r) => r.cells.map((value, i) => ({r, i, value})))
+      .filter((x) => x.r.cited && x.value === c.excerpt.trim());
+    t.rows.forEach((r) => {
+      const row = el("tr");
+      row.className = r.cited ? "cited" : "";
+      row.title = `Frozen source line L${r.line}`;
+      r.cells.forEach((value, i) => {
+        const cell = el(i === 0 ? "th" : "td", value);
+        if (i === 0) cell.scope = "row";
+        if (matches.length === 1 && matches[0].r === r && matches[0].i === i) cell.className = "cited-cell";
+        row.append(cell);
+      });
+      body.append(row);
     });
-    box.append(ctx);
-    if (view.table_header_is_heuristic)
-      box.append(
-        el("small", "Table header detection is heuristic; open the full source to confirm."),
-      );
+    table.append(body); wrap.append(table); box.append(wrap);
+    t.notes.forEach((r) => box.append(el("p", `L${r.line} (note): ${r.text}`)));
+  } else if (view) {
+    if (view.table?.reason !== "not a table") box.append(el("p", "Table structure could not be resolved"));
+    else box.append(el("blockquote", view.text));
+  } else if (c.excerpt) box.append(el("blockquote", c.excerpt));
+  if (view) {
+    const raw = el("details");
+    raw.append(el("summary", "Original numbered lines (raw fallback)"));
+    const ctx = el("div"); ctx.className = "context";
+    view.lines.forEach((row) => {
+      const label = {cited: "cited", table_header: "table header", note: "note"}[row.role];
+      const line = el("div", `L${row.line}${label ? " (" + label + ")" : ""}: ${row.text}`);
+      line.className = "ctx " + row.role; ctx.append(line);
+    });
+    raw.append(ctx); box.append(raw);
   }
+  if (c.status !== "located") box.append(el("p", "No source located"));
+  else if (!(evidence.links || {})[c.source_id]?.line_url) box.append(el("p", "No exact source link; use the frozen preview."));
   if (c.start_line !== null)
     box.append(originalLink(c.source_id, c.excerpt, c.start_line, c.end_line));
   const source = bundle.sources.find((s) => s.source_id === c.source_id);
   if (source) {
+    box.append(el("small", `${source.title} · Frozen SHA-256: ${source.sha256}`));
     const btn = el("button", "Open full frozen source");
     btn.onclick = () =>
       showSource(source, c.start_line || 1, c.end_line || c.start_line || 1);
     box.append(btn);
   }
 }
-function showSubject(item, id) {
+function showSubject(item, id, follow = true) {
   subject = id;
-  if (id) followSubject(id);
+  if (id && follow) followSubject(id);
+  $("evidence-panel").open = true;
   selection = null;
   logEvent("subject_opened", id || "");
   $("evidence").replaceChildren(el("h3", item.text));
-  (item.citations || []).forEach(cite);
-  if (item.calculation) {
-    const c = item.calculation;
-    const r = c.recomputation || { status: "unresolved" };
-    const box = $("evidence");
-    box.append(
-      el("h4", "Calculation"),
-      el("p", `Formula: ${c.formula}`),
-      el("p", `Reported result: ${c.result} ${c.unit}`),
-      el("p", `Absolute tolerance: ${c.tolerance} ${c.unit}`),
-    );
-    c.operands.forEach((o) => {
-      box.append(
-        el(
-          "p",
-          `Input ${o.name}: ${o.value} ${o.unit || "(unit unavailable)"} · period ${o.period || "unavailable"}`,
-        ),
-      );
-      if (o.citation) cite(o.citation);
-      else box.append(el("p", `Input ${o.name} source unavailable.`));
-    });
-    (c.conversions || []).forEach((v) => box.append(el("p", "Conversion: " + v)));
-    box.append(
-      el(
-        "p",
-        r.status === "unresolved"
-          ? `Arithmetic unresolved: ${r.reason || "cannot recompute"}`
-          : `Recomputed (Decimal): ${r.result} · arithmetic ${r.status} · discrepancy ${r.discrepancy}`,
-      ),
-    );
-    const ev = r.evidence;
-    if (ev) {
-      box.append(
-        el(
-          "p",
-          ev.status === "all_operands_cited"
-            ? "Input evidence: every input has a located citation."
-            : `Input evidence unresolved: no located citation for ${ev.missing.join(", ")}.`,
-        ),
-      );
-      ev.warnings.forEach((w) => box.append(el("p", "Warning: " + w)));
-      box.append(el("p", ev.note));
-    }
-  }
+  (item.citations || []).forEach((c) => cite(c));
+  if (item.calculation) renderCalculation(item.calculation, $("evidence"), true);
   if (!(item.citations || []).length && !item.calculation)
     $("evidence").append(
       el("p", "No cited evidence; search the frozen sources."),
     );
 }
-function showSpan(span) {
+function operandValue(o, box, preview) {
+  const row = el("p");
+  row.append(document.createTextNode(`Input ${o.name}: `));
+  const c = o.citation;
+  const href = c?.status === "located" && (evidence.links || {})[c.source_id]?.line_url
+    ? originalHref(c.source_id, c.excerpt, c.start_line, c.end_line) : null;
+  const value = el(href ? "a" : "span", o.value);
+  if (href) { value.href = href; value.target = "_blank"; value.rel = "noopener noreferrer";
+    value.onclick = () => logEvent("original_opened", c.source_id); }
+  row.append(value, document.createTextNode(` ${o.unit || "(unit unavailable)"} · period ${o.period || "unavailable"}${o.entity ? " · " + o.entity : ""}`));
+  box.append(row);
+  if (o.kind === "constant") box.append(el("p", "Mathematical constant: " + o.value));
+  else if (o.calculation) renderCalculation(o.calculation, box, preview);
+  else if (!c || c.status !== "located") {
+    box.append(el("p", `No source located for input ${o.name}`));
+    if (c) box.append(el("p", `${c.status}: ${c.reason}`));
+  }
+  else if (preview) cite(c, box);
+  else {
+    const p = el("button", "Preview input " + o.name);
+    p.onclick = () => { $("evidence-panel").open = true; $("evidence").replaceChildren(); cite(c); };
+    box.append(p);
+  }
+}
+function renderCalculation(c, box, preview = false) {
+  const r = c.recomputation || { status: "unresolved" };
+  box.append(el("h4", "Calculation"), el("p", `Formula: ${c.formula}`),
+    el("p", `Reported result: ${c.result} ${c.unit}`), el("p", `Absolute tolerance: ${c.tolerance} ${c.unit}`));
+  c.operands.forEach((o) => operandValue(o, box, preview));
+  // Literal constants are mathematical factors, never financial source claims.
+  const namesRemoved = c.formula.replace(/[A-Za-z_]\w*/g, "");
+  const constants = [...new Set(namesRemoved.match(/\d+(?:\.\d+)?/g) || [])];
+  constants.forEach((v) => box.append(el("p", "Mathematical constant: " + v)));
+  (c.conversions || []).forEach((v) => box.append(el("p", "Conversion: " + v)));
+  box.append(el("p", r.status === "unresolved" ? `Arithmetic unresolved: ${r.reason || "cannot recompute"}`
+    : `Recomputed (Decimal): ${r.result} · arithmetic ${r.status} · discrepancy ${r.discrepancy}`));
+  if (r.evidence) {
+    box.append(el("p", r.evidence.status === "all_operands_cited"
+      ? "Input evidence: every input has a located citation."
+      : `Input evidence unresolved: no located citation for ${r.evidence.missing.join(", ")}.`));
+    r.evidence.warnings.forEach((w) => box.append(el("p", "Warning: " + w)));
+    box.append(el("p", r.evidence.note));
+  }
+  box.append(el("p", "Arithmetic agreement does not verify input selection or interpretation."));
+}
+function showCalculation(span, anchor) {
+  document.querySelectorAll(".calculation-card").forEach((n) => n.remove());
+  const card = el("aside"); card.className = "calculation-card";
+  card.setAttribute("role", "region"); card.setAttribute("aria-label", "Calculation details");
+  renderCalculation(span.calculation, card);
+  const preview = el("button", "Preview calculation evidence");
+  preview.onclick = () => showSpan(span, false);
+  const close = el("button", "Close calculation details"); close.onclick = () => { card.remove(); anchor.focus(); };
+  card.append(preview, close); anchor.after(card);
   logEvent("span_opened", span.span_id);
+}
+function numberAction(s) {
+  const direct = directCitation(s);
+  const b = el(direct ? "a" : "button", s.text);
+  if (direct) { b.href = direct.href; b.target = "_blank"; b.rel = "noopener noreferrer"; }
+  b.className = "number " + (["uncited", "ambiguous", "unavailable"].includes(s.state) ? "unresolved"
+    : s.state === "identifier" ? "identifier" : direct ? "direct" : "");
+  b.title = s.state + (s.reason ? ": " + s.reason : "");
+  b.setAttribute("aria-label", `${s.text}, ${s.state}${direct ? ", opens the cited line of the original" : ""}`);
+  b.onclick = () => {
+    if (direct) logEvent("original_opened", direct.citation.source_id);
+    else if (s.calculation) showCalculation(s, b);
+    else showSpan(s, false);
+  };
+  const fragment = document.createDocumentFragment(); fragment.append(b);
+  if (direct) {
+    const preview = el("button", "Preview evidence"); preview.className = "preview-link";
+    preview.setAttribute("aria-label", "Preview evidence for " + s.text);
+    preview.onclick = () => showSpan(s, false); fragment.append(preview);
+  }
+  return fragment;
+}
+function linkedStatement(text, subjectId) {
+  const wrap = el("blockquote"); wrap.className = "item-text";
+  const field = bundle.fields.find((f) => f.role !== "context" && f.text === text && f.claim_ids.includes(subjectId));
+  if (!field) { wrap.textContent = text; return wrap; }
+  let at = 0; const chars = Array.from(text);
+  bundle.spans.filter((s) => s.field_path === field.path).sort((a,b) => a.start-b.start).forEach((s) => {
+    wrap.append(document.createTextNode(chars.slice(at,s.start).join("")), numberAction(s)); at = s.end;
+  });
+  wrap.append(document.createTextNode(chars.slice(at).join(""))); return wrap;
+}
+function showSpan(span, follow = true) {
+  $("evidence-panel").open = true;
+  logEvent("span_opened", span.span_id);
+  const contextLine = () => {
+    if (!span.context) return;
+    const c = span.context;
+    $("evidence").prepend(el("p", `Preparation context (${c.status}): metric ${c.metric || "unavailable"} · entity ${c.entity || "unavailable"} · period ${c.period || "unavailable"} · unit ${c.unit || "unavailable"}`));
+  };
+  if (span.prepared_evidence?.length) {
+    $("evidence").replaceChildren(el("h3", `${span.text}: ${span.state}`), el("p", span.reason), el("p", "Prepared for review; not supplied by the answer. Candidate evidence is preserved below."));
+    contextLine();
+    if (span.state === "ambiguous") $("evidence").append(el("p", "Multiple possible sources—no exact match established."));
+    span.prepared_evidence.forEach((p) => {
+      $("evidence").append(el("p", p.reason));
+      p.citations.forEach((c) => cite(c));
+      if (p.calculation) renderCalculation(p.calculation, $("evidence"), true);
+    });
+    $("evidence").append(el("h4", "Candidate-supplied evidence"));
+    span.citations.forEach((c) => cite(c));
+    if (span.calculation) renderCalculation(span.calculation, $("evidence"), true);
+    if (!span.citations.length && !span.calculation) $("evidence").append(el("p", "No source located in the answer"));
+    return;
+  }
   const linked = span.claim_ids
     .map((id) => bundle.claims.find((c) => c.claim_id === id))
     .filter(Boolean);
   if (span.citations.length || span.calculation) {
     // Evidence bound to this number, then the claim it belongs to.
     const item = {
-      text: `${span.text}: ${span.calculation ? "calculated" : "cited"}`,
+      text: `${span.text}: ${span.calculation ? "calculated" : span.state}${span.reason ? " · " + span.reason : ""}`,
       citations: span.citations,
       calculation: span.calculation,
     };
     const claim = linked.length === 1 ? linked[0] : null;
-    showSubject(item, claim ? claim.claim_id : null);
+    showSubject(item, claim ? claim.claim_id : null, follow);
+    if (span.context) {
+      const ctx = span.context;
+      $("evidence").prepend(el("p", `Preparation context (${ctx.status}): metric ${ctx.metric || "unavailable"} · entity ${ctx.entity || "unavailable"} · period ${ctx.period || "unavailable"} · unit ${ctx.unit || "unavailable"}`));
+    }
+    if (span.state === "ambiguous" || span.citations.length > 1) {
+      $("evidence").prepend(el("p", span.state === "ambiguous"
+        ? "Multiple possible sources—no exact match established." : "Choose a candidate-supplied source; no support is implied."));
+      const chooser = el("fieldset"); chooser.append(el("legend", "Source choices"));
+      span.citations.forEach((c, i) => {
+        const href = c.status === "located" && (evidence.links || {})[c.source_id]?.line_url
+          ? originalHref(c.source_id, c.excerpt, c.start_line, c.end_line) : null;
+        const option = el(href ? "a" : "span", `Source ${i + 1}: ${c.source_id} ${c.start_line ? "L" + c.start_line + "–L" + c.end_line : "unresolved"}`);
+        if (href) { option.href = href; option.target = "_blank"; option.rel = "noopener noreferrer";
+          option.onclick = () => logEvent("original_opened", c.source_id); }
+        chooser.append(option);
+      });
+      $("evidence").prepend(chooser);
+    }
     if (claim) {
       const b = el("button", `Whole claim ${claim.claim_id}: ${claim.text}`);
       b.className = "claim-link";
-      b.onclick = () => showSubject(claim, claim.claim_id);
+      b.onclick = () => showSubject(claim, claim.claim_id, false);
       $("evidence").append(b);
     }
-  } else if (linked.length === 1) showSubject(linked[0], linked[0].claim_id);
-  else {
+  } else {
     subject = null;
     $("evidence").replaceChildren(
       el("h3", `${span.text}: ${span.state}`),
@@ -431,10 +541,13 @@ function showSpan(span) {
       ),
     );
     linked.forEach((c) => {
-      const b = el("button", c.text);
-      b.onclick = () => showSubject(c, c.claim_id);
+      const b = el("button", "Whole claim: " + c.text);
+      b.onclick = () => showSubject(c, c.claim_id, false);
       $("evidence").append(b);
     });
+    contextLine();
+    $("evidence").append(el("p", span.state === "ambiguous"
+      ? "Multiple possible sources—no exact match established." : "No source located."));
     if (["uncited", "ambiguous", "unavailable"].includes(span.state)) {
       // Offer every frozen line containing the number; a match is a lead, not support.
       $("search").value = span.text;
@@ -463,34 +576,7 @@ function renderReport() {
     const chars = Array.from(f.text);
     spans.forEach((s) => {
       p.append(document.createTextNode(chars.slice(offset, s.start).join("")));
-      const direct = directCitation(s);
-      const b = el(direct ? "a" : "button", s.text);
-      if (direct) {
-        // One click lands on the cited line of the original; the panel shows the same line.
-        b.href = direct.href;
-        b.target = "_blank";
-        b.rel = "noopener noreferrer";
-      }
-      b.className =
-        "number " +
-        (["uncited", "ambiguous", "unavailable"].includes(s.state)
-          ? "unresolved"
-          : s.state === "identifier"
-            ? "identifier"
-            : direct
-              ? "direct"
-              : "");
-      b.title = s.state + (s.reason ? ": " + s.reason : "");
-      // State is part of the accessible name, not conveyed by colour alone.
-      b.setAttribute(
-        "aria-label",
-        `${s.text}, ${s.state}${direct ? ", opens the cited line of the original" : ""}`,
-      );
-      b.onclick = () => {
-        showSpan(s);
-        if (direct) logEvent("original_opened", direct.citation.source_id);
-      };
-      p.append(b);
+      p.append(numberAction(s));
       offset = s.end;
     });
     p.append(document.createTextNode(chars.slice(offset).join("")));
@@ -510,11 +596,14 @@ function isReference(id) {
 function answered(f) {
   const j = answers.judgments[f.field_id];
   if (!j) return false;
-  if (f.require_true) return j.value === true;
+  if (f.require_true && j.value !== true) return false;
+  if (f.note_required_unless.length && !f.note_required_unless.includes(j.value) && !j.note.trim()) return false;
+  if (f.evidence_required && !j.selections.length) return false;
   return f.kind === "text" ? String(j.value).trim() !== "" : j.value !== "";
 }
 function itemFields() {
-  return bundle.form.filter((f) => f.subject_id);
+  const ids = [...new Set(bundle.form.filter((f) => f.subject_id).map((f) => f.subject_id))];
+  return ids.flatMap((id) => bundle.form.filter((f) => f.subject_id === id));
 }
 function short(text, n = 90) {
   return text.length > n ? text.slice(0, n - 1) + "…" : text;
@@ -541,7 +630,7 @@ function goTo(fieldId, focus = true) {
   current = fieldId;
   const f = bundle.form.find((x) => x.field_id === fieldId);
   const item = f && subjectOf(f);
-  if (item) showSubject(item, f.subject_id);
+  if (item) showSubject(item, f.subject_id, false);
   renderForms();
   if (focus) $("field-" + fieldId)?.focus();
 }
@@ -621,6 +710,7 @@ function fieldControl(f, div) {
   note.oninput = () => {
     judgment(f.field_id).note = note.value;
     save();
+    progress();
   };
   div.append(note);
   if (f.subject_id && isReference(f.subject_id)) claimLinks(f, div);
@@ -653,10 +743,21 @@ function progress() {
   const items = itemFields();
   const at = items.findIndex((f) => f.field_id === current);
   const next = nextUnanswered();
+  const judgments = required.filter((f) => !(f.kind === "boolean" && f.require_true));
+  const optional = bundle.form.filter((f) => !f.required).length;
+  const technical = required.length - judgments.length;
+  const jAt = judgments.findIndex((f) => f.field_id === current);
   $("progress").textContent =
-    `${done} of ${required.length} required answers given` +
+    `Judgment ${jAt >= 0 ? jAt + 1 : 1} of ${judgments.length} in this answer · ` +
+    `${done} of ${required.length} required fields complete · ${optional} optional field${optional === 1 ? "" : "s"} · ${technical} completion control${technical === 1 ? "" : "s"}` +
     (at >= 0 ? ` · item ${at + 1} of ${items.length}` : "") +
     (next ? ` · next unanswered: ${next.label}` : items.length ? " · every item answered; finish below" : "");
+  const field = bundle.form.find((f) => f.field_id === current);
+  const j = field && answers.judgments[field.field_id];
+  const missing = [];
+  if (j && field.note_required_unless.length && !field.note_required_unless.includes(j.value) && !j.note.trim()) missing.push("explanation");
+  if (j && field.evidence_required && !j.selections.length) missing.push("source passage");
+  if (missing.length) $("progress").textContent += " · Pending: " + missing.join(" and ");
   const button = $("next-item");
   if (button) button.textContent = next ? "Next unanswered item" : "Go to finish";
 }
@@ -664,6 +765,7 @@ function renderForms() {
   const items = itemFields();
   if (current === null || !items.some((f) => f.field_id === current))
     current = (items.find((f) => !answered(f)) || items[0] || {}).field_id ?? null;
+  const evidencePanel = $("evidence-panel"); evidencePanel.remove();
   $("items").replaceChildren();
   items.forEach((f, i) => {
     const item = subjectOf(f);
@@ -685,11 +787,10 @@ function renderForms() {
     div.append(el("h3", `Item ${i + 1} of ${items.length}: ${f.label}`));
     if (item) {
       div.append(el("p", isReference(f.subject_id) ? "Reference item:" : "Statement under review:"));
-      const quote = el("blockquote", item.text);
-      quote.className = "item-text";
-      div.append(quote);
-      div.append(el("small", "Its evidence is shown in the Evidence pane."));
+      div.append(linkedStatement(item.text, f.subject_id));
+      div.append(el("small", isReference(f.subject_id) ? "Coverage: decide whether the answer addresses this reference." : "Evidence support: decide whether the source supports the statement as written."));
     }
+    div.append(evidencePanel);
     fieldControl(f, div);
     const nav = el("div");
     nav.className = "item-nav";
@@ -707,6 +808,7 @@ function renderForms() {
     div.append(nav);
     $("items").append(div);
   });
+  if (!items.length) $("items").append(evidencePanel);
   $("forms").replaceChildren();
   bundle.form
     .filter((f) => !f.subject_id)
@@ -797,6 +899,15 @@ function renderDefects() {
 }
 function render() {
   $("task").textContent = bundle.bundle_id + " · " + bundle.task_kind;
+  $("workload").replaceChildren();
+  if (evidence.workload || bundle.workload) {
+    const w = evidence.workload || bundle.workload;
+    const label = ["independent", "adjudication"].includes(bundle.task_kind) ? "Answer" : "Task";
+    $("workload").append(el("p", `${label} ${w.answer_index} of ${w.assigned_answers} assigned`),
+      el("p", Object.entries(w.task_counts).map(([kind,n]) => `${kind}: ${n}`).join(" · ")),
+      el("p", "Why assigned: " + w.assignment_reason));
+    w.expansion_conditions.forEach((c) => $("workload").append(el("p", "Conditional future work: " + c)));
+  } else $("workload").append(el("p", "Assigned answer total not supplied by caller"));
   $("instructions").replaceChildren();
   if (bundle.instructions) {
     $("instructions").append(el("h2", "What to do"));
@@ -817,7 +928,8 @@ function render() {
   }
   renderForms();
   const first = bundle.form.find((f) => f.field_id === current);
-  if (first && subjectOf(first)) showSubject(subjectOf(first), first.subject_id);
+  if (first && subjectOf(first)) showSubject(subjectOf(first), first.subject_id, false);
+  $("evidence-panel").open = false;
   renderDefects();
   $("subjects").replaceChildren();
   [...bundle.claims, ...bundle.references].forEach((c) => {
@@ -926,6 +1038,7 @@ document.addEventListener("keydown", (event) => {
   );
   if (event.key === "/" && !typing) {
     event.preventDefault();
+    $("evidence-panel").open = true;
     $("search").focus();
   } else if ((event.key === "n" || event.key === "p") && !typing && !event.metaKey && !event.ctrlKey) {
     const items = itemFields();

@@ -227,6 +227,43 @@
       "title": "FormField",
       "type": "object"
     },
+    "NumericContext": {
+      "additionalProperties": false,
+      "properties": {
+        "metric": {
+          "default": "",
+          "title": "Metric",
+          "type": "string"
+        },
+        "entity": {
+          "default": "",
+          "title": "Entity",
+          "type": "string"
+        },
+        "period": {
+          "default": "",
+          "title": "Period",
+          "type": "string"
+        },
+        "unit": {
+          "default": "",
+          "title": "Unit",
+          "type": "string"
+        },
+        "status": {
+          "default": "unavailable",
+          "enum": [
+            "resolved",
+            "ambiguous",
+            "unavailable"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "title": "NumericContext",
+      "type": "object"
+    },
     "NumericSpan": {
       "additionalProperties": false,
       "properties": {
@@ -294,6 +331,24 @@
             }
           ],
           "default": null
+        },
+        "context": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NumericContext"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "prepared_evidence": {
+          "items": {
+            "$ref": "#/$defs/PreparedEvidence"
+          },
+          "title": "Prepared Evidence",
+          "type": "array"
         }
       },
       "required": [
@@ -337,6 +392,32 @@
             }
           ],
           "default": null
+        },
+        "kind": {
+          "default": "source",
+          "enum": [
+            "source",
+            "constant",
+            "derived"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "entity": {
+          "default": "",
+          "title": "Entity",
+          "type": "string"
+        },
+        "calculation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Calculation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -344,6 +425,42 @@
         "value"
       ],
       "title": "Operand",
+      "type": "object"
+    },
+    "PreparedEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "origin": {
+          "const": "independently_located",
+          "default": "independently_located",
+          "title": "Origin",
+          "type": "string"
+        },
+        "citations": {
+          "items": {
+            "$ref": "#/$defs/Citation"
+          },
+          "title": "Citations",
+          "type": "array"
+        },
+        "calculation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Calculation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "reason": {
+          "default": "",
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "title": "PreparedEvidence",
       "type": "object"
     },
     "ReferenceItem": {
@@ -423,6 +540,46 @@
       "title": "ReportField",
       "type": "object"
     },
+    "ReviewWorkload": {
+      "additionalProperties": false,
+      "properties": {
+        "answer_index": {
+          "minimum": 1,
+          "title": "Answer Index",
+          "type": "integer"
+        },
+        "assigned_answers": {
+          "minimum": 1,
+          "title": "Assigned Answers",
+          "type": "integer"
+        },
+        "task_counts": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Task Counts",
+          "type": "object"
+        },
+        "assignment_reason": {
+          "default": "",
+          "title": "Assignment Reason",
+          "type": "string"
+        },
+        "expansion_conditions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Expansion Conditions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "answer_index",
+        "assigned_answers"
+      ],
+      "title": "ReviewWorkload",
+      "type": "object"
+    },
     "Source": {
       "additionalProperties": false,
       "properties": {
@@ -495,6 +652,17 @@
       "default": "",
       "title": "Instructions",
       "type": "string"
+    },
+    "workload": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ReviewWorkload"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "fields": {
       "items": {
