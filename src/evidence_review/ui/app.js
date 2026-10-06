@@ -100,7 +100,7 @@ function status() {
   const hook = state.hook;
   $("status").className = "";
   $("status").textContent =
-    `Draft: Saved locally · revision ${state.revision} · ${completed}/${bundle.form.length} fields answered`;
+    `${matchesSubmitted(answers, $("assessor").value.trim()) ? "Submitted" : "Draft"}: Saved locally · revision ${state.revision} · ${completed}/${bundle.form.length} fields answered`;
   // Consumer backup/import status is never folded into the local save message.
   const submitted = state.last_submission
     ? `submitted revision ${state.last_submission}`
