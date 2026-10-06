@@ -208,6 +208,7 @@ function save(submit = false) {
       if (submit) body.amendment_reason = reason;
       try {
         state = await api(submit ? "/api/submit" : "/api/save", body);
+        if (submit) $("submission-blockers").hidden = true;
         status();
       } catch (err) {
         if (err.status === 409) {
@@ -229,12 +230,13 @@ function save(submit = false) {
         active += elapsed;
         $("status").className = "save-error";
         $("status").textContent =
-          "Not saved: " +
+          (submit ? "Not submitted: " : "Not saved: ") +
           err.message +
           (conflicted
             ? " · reload to reconcile before continuing."
             : " · correct the fields and save again.");
         $("next").disabled = true;
+        if (submit) showSubmissionBlockers();
       }
     });
   return queue;
@@ -689,6 +691,8 @@ function renderReport() {
       offset = s.end;
     });
     p.append(document.createTextNode(chars.slice(offset).join("")));
+    p.dataset.savedText = f.text;
+    p.dataset.claimIds = JSON.stringify(f.claim_ids || []);
     report.append(p);
   });
 }
@@ -743,15 +747,18 @@ function goTo(fieldId, focus = true) {
   renderForms();
   if (focus) $("field-" + fieldId)?.focus();
 }
-function claimLinks(f, div) {
-  // Coverage may rest on several claims; show their text, not bare identifiers.
-  const box = el("fieldset");
-  box.append(el("legend", "Claims that address this item (choose all that apply)"));
+function claimLinks(f) {
+  // Select alongside the exact saved claim, while the issue stays in its own pane.
+  document.querySelectorAll(".claim-choice").forEach((node) => node.remove());
+  if (!f || !isReference(f.subject_id)) return;
   bundle.claims.forEach((c) => {
+    const target = [...$("report").querySelectorAll(".report-text")]
+      .find((node) => node.dataset.savedText === c.text && JSON.parse(node.dataset.claimIds).includes(c.claim_id));
     const l = el("label");
     l.className = "claim-choice";
     const check = el("input");
     check.type = "checkbox";
+    check.setAttribute("aria-label", `${c.claim_id}: ${c.text}`);
     check.checked = (answers.judgments[f.field_id]?.claim_ids || []).includes(c.claim_id);
     check.onchange = () => {
       const j = judgment(f.field_id);
@@ -760,10 +767,13 @@ function claimLinks(f, div) {
         : j.claim_ids.filter((id) => id !== c.claim_id);
       save();
     };
-    l.append(check, document.createTextNode(` ${c.claim_id}: ${short(c.text)}`));
-    box.append(l);
+    l.append(check, document.createTextNode(` ${c.claim_id} addresses this issue`));
+    if (target) target.before(l);
+    else {
+      l.append(linkedStatement(c.text, c.claim_id));
+      $("report").append(l);
+    }
   });
-  div.append(box);
 }
 function fieldControl(f, div) {
   let control;
@@ -789,7 +799,9 @@ function fieldControl(f, div) {
     const dl = el("dl");
     dl.className = "option-help";
     meanings.forEach(([option, text]) => dl.append(el("dt", option), el("dd", text)));
-    div.append(dl);
+    const definitions = el("details");
+    definitions.append(el("summary", "Judgment definitions"), dl);
+    div.append(definitions);
   }
   const label = el("label", f.label + (f.required ? " *" : ""));
   control.id = "field-" + f.field_id;
@@ -822,7 +834,8 @@ function fieldControl(f, div) {
     progress();
   };
   div.append(note);
-  if (f.subject_id && isReference(f.subject_id)) claimLinks(f, div);
+  if (f.subject_id && isReference(f.subject_id))
+    div.append(el("p", "Select the claims that address this issue in the report pane."));
   const attach = el("button", "Attach selected source passage");
   attach.onclick = () => {
     if (!selection) {
@@ -870,25 +883,50 @@ function progress() {
   const button = $("next-item");
   if (button) button.textContent = next ? "Next unanswered item" : "Go to finish";
 }
+function showSubmissionBlockers() {
+  const box = $("submission-blockers");
+  const pending = bundle.form.filter((f) => f.required && !answered(f));
+  box.replaceChildren(el("p", `${pending.length} fields need attention before submission. Your decisions are unchanged.`));
+  pending.forEach((f) => {
+    const j = answers.judgments[f.field_id];
+    const note = j && f.note_required_unless.length && !f.note_required_unless.includes(j.value) && !j.note.trim();
+    const b = el("button", `${note ? "Add explanation" : "Complete field"}: ${f.label}`);
+    b.onclick = () => {
+      box.hidden = true;
+      if (f.subject_id) goTo(f.field_id);
+      else $("field-" + f.field_id)?.focus();
+      if (note) document.querySelector(`[aria-label="Explanation: ${CSS.escape(f.label)}"]`)?.focus();
+    };
+    box.append(b);
+  });
+  box.hidden = !pending.length;
+  if (pending.length) box.scrollIntoView({ block: "nearest" });
+}
 function renderForms() {
   const items = itemFields();
   if (current === null || !items.some((f) => f.field_id === current))
     current = (items.find((f) => !answered(f)) || items[0] || {}).field_id ?? null;
-  const evidencePanel = $("evidence-panel"); evidencePanel.remove();
+  $("item-links").replaceChildren();
+  claimLinks(bundle.form.find((f) => f.field_id === current));
   $("items").replaceChildren();
   items.forEach((f, i) => {
     const item = subjectOf(f);
     const div = el("div");
     div.className = "item" + (answered(f) ? " answered" : "");
     if (f.field_id !== current) {
+      const j = answers.judgments[f.field_id];
+      const saved = j && j.value !== "";
+      const pending = j && f.note_required_unless.length && !f.note_required_unless.includes(j.value) && !j.note.trim()
+        ? "needs explanation" : "incomplete";
+      const state = answered(f) ? "answered" : saved ? `selected · ${pending}` : "unanswered";
       const open = el(
         "button",
-        `${i + 1}. ${f.label} · ${answered(f) ? "answered" : "unanswered"}${item ? " · " + short(item.text, 70) : ""}`,
+        `${i + 1}. ${f.label} · ${state}${item ? " · " + short(item.text, 70) : ""}`,
       );
       open.className = "item-link";
       open.onclick = () => goTo(f.field_id);
       div.append(open);
-      $("items").append(div);
+      $("item-links").append(div);
       return;
     }
     div.classList.add("current");
@@ -899,7 +937,6 @@ function renderForms() {
       div.append(linkedStatement(item.text, f.subject_id));
       div.append(el("small", isReference(f.subject_id) ? "Coverage: decide whether the answer addresses this reference." : "Evidence support: decide whether the source supports the statement as written."));
     }
-    div.append(evidencePanel);
     fieldControl(f, div);
     const nav = el("div");
     nav.className = "item-nav";
@@ -917,7 +954,6 @@ function renderForms() {
     div.append(nav);
     $("items").append(div);
   });
-  if (!items.length) $("items").append(evidencePanel);
   $("forms").replaceChildren();
   bundle.form
     .filter((f) => !f.subject_id)

@@ -30,6 +30,8 @@ evidence-review serve --bundle bundle.json --state-dir review-data
 evidence-review export --state-dir review-data --task <bundle-id> --revision 1
 ```
 
+On wide screens, the report and claim selection, current judgment, and source evidence occupy independently scrolling panes. Narrow screens stack the panes. Coverage checkboxes sit beside the exact claim text. Selected decisions that still need explanations are distinguished from unanswered items; submission errors link directly to incomplete fields.
+
 Enter your assessor name once. A reported number with one exact source opens its original line in a new tab; adjacent Preview evidence keeps the frozen context local. A derived number opens a compact calculation card with directly linked input values and an optional full preview. Arithmetic results remain unresolved when source inputs are missing. Only explicitly bound per-number evidence is used; whole-claim evidence is a separately labeled action. Unresolved numbers are marked with `?`, dates and identifiers with `#`. Open the full frozen source or search it (press `/`), then select its first and last line to attach a passage. Choose support and coverage explicitly; record defects and materiality when applicable. Submit after reviewing the full report. Later submissions require an amendment reason.
 
 Each edit saves on input and displays Saving until acknowledgement. Required boolean decisions accept explicit Yes or No; completion acknowledgements require Yes. Local save status and caller continuation/backup status are shown on separate lines. If another tab saved first, nothing is overwritten: the app lists the differing answers and you choose to load the saved version or keep this tab's answers as a new revision.

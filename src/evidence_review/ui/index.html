@@ -24,14 +24,13 @@
       </div>
     </header>
     <main>
-      <section aria-label="Report">
+      <section class="review-pane" aria-label="Report" tabindex="0">
         <div id="instructions" aria-label="What to do"></div>
         <div id="context-box" aria-label="Task context">
           <h2>Study and task context</h2>
           <p class="legend">Caller-provided study guidance and question. These are not part of the saved answer.</p>
           <div id="context"></div>
         </div>
-        <section id="resource-guide" aria-label="Resource guide"></section>
         <h2>Exact saved answer under review</h2>
         <p class="legend">
           Reported numbers open exact source lines when located. Derived numbers show their formula. Preview evidence keeps you here. <span class="number">Mapped</span>
@@ -40,30 +39,19 @@
           <span class="number identifier">Date or identifier</span>
         </p>
         <div id="report"></div>
+        <section id="resource-guide" aria-label="Resource guide"></section>
         <details>
           <summary>All claims and reference items</summary>
           <div id="subjects"></div>
         </details>
       </section>
-      <section aria-label="Judgments">
+      <section class="review-pane" aria-label="Judgments" tabindex="0">
         <h2>Your current judgment</h2>
         <p>Follow the task instructions and rubric. Check statement support, required-issue coverage, reference validity or finding validity as assigned; record explicit defects separately.</p>
         <p id="progress" role="status" aria-live="polite" aria-label="Review progress"></p>
-        <details id="evidence-panel">
-        <summary>Preview evidence and search frozen sources</summary>
-        <section aria-label="Evidence">
-        <h2>Evidence</h2>
-        <p>Arithmetic and excerpt matching do not establish factual support.</p>
-        <div id="evidence"></div>
-        <label>Search frozen sources (press /) <input type="search" id="search" /></label>
-        <div id="search-results"></div>
-        <details>
-          <summary>All frozen sources</summary>
-          <div id="sources"></div>
-        </details>
-        </section>
-      </details>
+        <div id="submission-blockers" aria-label="Submission requirements" role="alert" hidden></div>
         <div id="items"></div>
+        <details id="item-navigation" open><summary>Review items</summary><div id="item-links"></div></details>
         <h3>Finish</h3>
         <div id="forms"></div>
         <h3>Defects</h3>
@@ -74,6 +62,23 @@
         ><button id="submit" type="button">Submit review</button
         ><button id="reconcile" type="button">Reconcile continuation</button
         ><button id="next" type="button">Next task</button>
+      </section>
+      <section class="review-pane" aria-label="Evidence" tabindex="0">
+        <h2>Source evidence</h2>
+        <details id="evidence-panel">
+        <summary>Preview evidence and search frozen sources</summary>
+        <div>
+        <h2>Evidence</h2>
+        <p>Arithmetic and excerpt matching do not establish factual support.</p>
+        <div id="evidence"></div>
+        <label>Search frozen sources (press /) <input type="search" id="search" /></label>
+        <div id="search-results"></div>
+        <details>
+          <summary>All frozen sources</summary>
+          <div id="sources"></div>
+        </details>
+        </div>
+      </details>
       </section>
     </main>
     <script src="/app.js" defer></script>
