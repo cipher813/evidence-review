@@ -264,6 +264,40 @@
       "title": "NumericContext",
       "type": "object"
     },
+    "NumericDiagnostics": {
+      "additionalProperties": false,
+      "properties": {
+        "preparation_status": {
+          "enum": [
+            "resolved",
+            "unresolved"
+          ],
+          "title": "Preparation Status",
+          "type": "string"
+        },
+        "candidate": {
+          "items": {
+            "$ref": "#/$defs/TechnicalDiagnostic"
+          },
+          "title": "Candidate",
+          "type": "array"
+        },
+        "attempts": {
+          "items": {
+            "$ref": "#/$defs/PreparationAttempt"
+          },
+          "minItems": 1,
+          "title": "Attempts",
+          "type": "array"
+        }
+      },
+      "required": [
+        "preparation_status",
+        "attempts"
+      ],
+      "title": "NumericDiagnostics",
+      "type": "object"
+    },
     "NumericSpan": {
       "additionalProperties": false,
       "properties": {
@@ -349,6 +383,17 @@
           },
           "title": "Prepared Evidence",
           "type": "array"
+        },
+        "diagnostics": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NumericDiagnostics"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -425,6 +470,37 @@
         "value"
       ],
       "title": "Operand",
+      "type": "object"
+    },
+    "PreparationAttempt": {
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "minLength": 1,
+          "title": "Method",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "resolved",
+            "unresolved"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "diagnostics": {
+          "items": {
+            "$ref": "#/$defs/TechnicalDiagnostic"
+          },
+          "title": "Diagnostics",
+          "type": "array"
+        }
+      },
+      "required": [
+        "method",
+        "status"
+      ],
+      "title": "PreparationAttempt",
       "type": "object"
     },
     "PreparedEvidence": {
@@ -614,6 +690,61 @@
         "sha256"
       ],
       "title": "Source",
+      "type": "object"
+    },
+    "TechnicalDiagnostic": {
+      "additionalProperties": false,
+      "description": "Caller-attributed mechanical facts or limitations, never human verdicts.",
+      "properties": {
+        "scope": {
+          "enum": [
+            "candidate_citation",
+            "candidate_input",
+            "candidate_arithmetic",
+            "preparation"
+          ],
+          "title": "Scope",
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "consistent",
+            "inconsistent",
+            "unresolved"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "reason": {
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "input_path": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Input Path",
+          "type": "array"
+        },
+        "citation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Citation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "scope",
+        "outcome",
+        "reason"
+      ],
+      "title": "TechnicalDiagnostic",
       "type": "object"
     }
   },

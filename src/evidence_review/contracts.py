@@ -9,7 +9,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-PACKAGE_VERSION = "0.4.1"
+PACKAGE_VERSION = "0.4.2"
 
 
 def canonical_json(value) -> bytes:
@@ -150,6 +150,46 @@ class PreparedEvidence(Strict):
     reason: str = ""
 
 
+class TechnicalDiagnostic(Strict):
+    """Caller-attributed mechanical facts or limitations, never human verdicts."""
+    scope: Literal["candidate_citation", "candidate_input", "candidate_arithmetic", "preparation"]
+    outcome: Literal["consistent", "inconsistent", "unresolved"]
+    reason: str = Field(min_length=1)
+    input_path: list[str] = Field(default_factory=list)
+    citation: Citation | None = None
+
+
+class PreparationAttempt(Strict):
+    method: str = Field(min_length=1)
+    status: Literal["resolved", "unresolved"]
+    diagnostics: list[TechnicalDiagnostic] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def attributed_failure(self):
+        if self.status == "unresolved" and not self.diagnostics:
+            raise ValueError("failed preparation requires an attributed reason")
+        if self.status == "resolved" and any(d.outcome != "consistent" for d in self.diagnostics):
+            raise ValueError("resolved attempt cannot carry failed diagnostics")
+        if any(d.scope != "preparation" for d in self.diagnostics):
+            raise ValueError("preparation attempt cannot carry candidate diagnostics")
+        return self
+
+
+class NumericDiagnostics(Strict):
+    preparation_status: Literal["resolved", "unresolved"]
+    candidate: list[TechnicalDiagnostic] = Field(default_factory=list)
+    attempts: list[PreparationAttempt] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def final_outcome(self):
+        resolved = any(a.status == "resolved" for a in self.attempts)
+        if resolved != (self.preparation_status == "resolved"):
+            raise ValueError("final preparation outcome contradicts method attempts")
+        if any(d.scope == "preparation" for d in self.candidate):
+            raise ValueError("candidate diagnostics cannot carry preparation outcomes")
+        return self
+
+
 class NumericSpan(Strict):
     span_id: str
     field_path: str
@@ -167,6 +207,7 @@ class NumericSpan(Strict):
     calculation: Calculation | None = None
     context: NumericContext | None = None
     prepared_evidence: list[PreparedEvidence] = Field(default_factory=list)
+    diagnostics: NumericDiagnostics | None = None
 
 
 class ReviewWorkload(Strict):
@@ -256,12 +297,14 @@ class ReviewBundle(Strict):
         for n in self.spans:
             if n.state in ("cited", "derived") and not n.claim_ids:
                 raise ValueError("mapped span needs claims")
-            if n.state == "identifier" and (n.citations or n.calculation or n.prepared_evidence):
+            if n.diagnostics and bool(n.prepared_evidence) != (n.diagnostics.preparation_status == "resolved"):
+                raise ValueError("prepared evidence contradicts diagnostic outcome")
+            if n.state == "identifier" and (n.citations or n.calculation or n.prepared_evidence or n.diagnostics):
                 raise ValueError("identifier spans carry no evidence")
         context = {f.path for f in self.fields if f.role == "context"}
         for n in self.spans:
             if n.field_path in context and (
-                n.claim_ids or n.citations or n.calculation or n.prepared_evidence or n.context or n.state != "identifier"
+                n.claim_ids or n.citations or n.calculation or n.prepared_evidence or n.context or n.diagnostics or n.state != "identifier"
             ):
                 raise ValueError("context numbers are not assertions")
         def validate_calc(calc, depth=0):
@@ -276,6 +319,11 @@ class ReviewBundle(Strict):
                 if operand.calculation:
                     validate_calc(operand.calculation, depth + 1)
 
+        for n in self.spans:
+            if n.diagnostics:
+                for d in [*n.diagnostics.candidate, *(d for a in n.diagnostics.attempts for d in a.diagnostics)]:
+                    if d.citation:
+                        validate_citation(d.citation, sources)
         prepared = [p for n in self.spans for p in n.prepared_evidence]
         for c in [*self.claims, *self.references, *self.spans, *prepared]:
             for citation in c.citations:

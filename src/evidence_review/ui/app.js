@@ -443,10 +443,45 @@ function renderCalculation(c, box, preview = false) {
   }
   box.append(el("p", "Arithmetic agreement does not verify input selection or interpretation."));
 }
+function renderDiagnostics(span, box) {
+  const d = span.diagnostics;
+  if (!d) return;
+  const panel = el("section"); panel.className = "number-diagnostics";
+  panel.append(el("h4", "Technical diagnostics"),
+    el("p", "Independent preparation: " + d.preparation_status),
+    el("p", "Location and arithmetic checks do not decide support, defects or materiality."));
+  function issue(x) {
+    const scope = {candidate_citation: "Candidate citation", candidate_input: "Candidate input", candidate_arithmetic: "Candidate arithmetic", preparation: "Preparation limitation"}[x.scope];
+    panel.append(el("p", `${scope} · ${x.outcome}${x.input_path.length ? " · " + x.input_path.join(" → ") : ""}: ${x.reason}`));
+    const c = x.citation;
+    if (!c) return;
+    panel.append(el("p", `Source ${c.source_id} · ${c.start_line == null ? "range unavailable" : "L" + c.start_line + "–L" + c.end_line} · ${c.status}`));
+    const source = bundle.sources.find((s) => s.source_id === c.source_id);
+    if (source) {
+      const inspect = el("button", "Inspect diagnostic source " + c.source_id);
+      inspect.onclick = () => {
+        $("evidence-panel").open = true; $("evidence").replaceChildren();
+        const valid = Number.isInteger(c.start_line) && Number.isInteger(c.end_line) && c.start_line >= 1 && c.end_line >= c.start_line && c.end_line <= source.text.split("\n").length;
+        showSource(source, valid ? c.start_line : 1, valid ? c.end_line : 1);
+      };
+      panel.append(inspect);
+    }
+  }
+  panel.append(el("h4", "Candidate technical checks"));
+  d.candidate.forEach(issue);
+  d.attempts.forEach((a, i) => {
+    const earlier = a.status === "unresolved" && d.attempts.slice(i + 1).some((later) => later.status === "resolved");
+    panel.append(el("h4", `${earlier ? "Earlier method — " : "Method — "}${a.method}: ${a.status}`));
+    if (earlier) panel.append(el("p", "A later method supplied prepared evidence; this earlier limitation is retained as history."));
+    a.diagnostics.forEach(issue);
+  });
+  box.append(panel);
+}
 function showCalculation(span, anchor) {
   document.querySelectorAll(".calculation-card").forEach((n) => n.remove());
   const card = el("aside"); card.className = "calculation-card";
   card.setAttribute("role", "region"); card.setAttribute("aria-label", "Calculation details");
+  renderDiagnostics(span, card);
   (span.prepared_evidence || []).forEach((p) => {
     card.append(el("h4", "Prepared calculation"), el("p", "Prepared for review; not supplied by the answer."), el("p", p.reason));
     if (p.calculation) renderCalculation(p.calculation, card);
@@ -465,8 +500,9 @@ function numberAction(s) {
   if (direct) { b.href = direct.href; b.target = "_blank"; b.rel = "noopener noreferrer"; }
   b.className = "number " + (["uncited", "ambiguous", "unavailable"].includes(s.state) ? "unresolved"
     : s.state === "identifier" ? "identifier" : direct ? "direct" : "");
-  b.title = s.state + (s.reason ? ": " + s.reason : "");
-  b.setAttribute("aria-label", `${s.text}, ${s.state}${direct ? ", opens the cited line of the original" : ""}`);
+  const stateLabel = s.diagnostics ? `candidate evidence ${s.state}; preparation ${s.diagnostics.preparation_status}` : s.state;
+  b.title = stateLabel + (s.reason ? ": " + s.reason : "");
+  b.setAttribute("aria-label", `${s.text}, ${stateLabel}${direct ? ", opens the cited line of the original" : ""}`);
   b.onclick = () => {
     if (direct) logEvent("original_opened", direct.citation.source_id);
     else if (s.calculation) showCalculation(s, b);
@@ -501,6 +537,7 @@ function showSpan(span, follow = true) {
   if (span.prepared_evidence?.length) {
     $("evidence").replaceChildren(el("h3", `${span.text}: ${span.state}`), el("p", span.reason), el("p", "Prepared for review; not supplied by the answer. Candidate evidence is preserved below."));
     contextLine();
+    renderDiagnostics(span, $("evidence"));
     if (span.state === "ambiguous") $("evidence").append(el("p", "Multiple possible sources—no exact match established."));
     span.prepared_evidence.forEach((p) => {
       $("evidence").append(el("p", p.reason));
@@ -576,6 +613,7 @@ function showSpan(span, follow = true) {
       );
     }
   }
+  renderDiagnostics(span, $("evidence"));
 }
 function renderReport() {
   const report = $("report");
