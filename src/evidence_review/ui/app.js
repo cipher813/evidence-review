@@ -571,6 +571,23 @@ function numberAction(s) {
     else showSpan(s, false);
   };
   const fragment = document.createDocumentFragment(); fragment.append(b);
+  const verification = bundle.form.find((f) => f.numeric_span_id === s.span_id);
+  if (verification) {
+    const label = el("label");
+    const check = el("input"); check.type = "checkbox";
+    check.dataset.quantityField = verification.field_id;
+    check.checked = answers.judgments[verification.field_id]?.value === true;
+    check.setAttribute("aria-label", verification.label);
+    check.title = "Checked means you verified this quantity against the evidence";
+    check.onchange = () => {
+      judgment(verification.field_id).value = check.checked;
+      document.querySelectorAll("input[data-quantity-field]").forEach((other) => {
+        if (other.dataset.quantityField === verification.field_id) other.checked = check.checked;
+      });
+      save(); progress();
+    };
+    label.append(check); fragment.append(label);
+  }
   if (direct) {
     const preview = el("button", "Preview evidence"); preview.className = "preview-link";
     preview.setAttribute("aria-label", "Preview evidence for " + s.text);
@@ -727,13 +744,16 @@ function answered(f) {
   const j = answers.judgments[f.field_id];
   if (!j) return false;
   if (f.require_true && j.value !== true) return false;
+  if ((f.numeric_verification_values || []).includes(j.value) &&
+      bundle.form.some((q) => q.numeric_span_id && q.subject_id === f.subject_id &&
+        answers.judgments[q.field_id]?.value !== true)) return false;
   if (f.note_required_unless.length && !f.note_required_unless.includes(j.value) && !j.note.trim()) return false;
   if (f.evidence_required && !j.selections.length) return false;
   return f.kind === "text" ? String(j.value).trim() !== "" : j.value !== "";
 }
 function itemFields() {
   const ids = [...new Set(bundle.form.filter((f) => f.subject_id).map((f) => f.subject_id))];
-  return ids.flatMap((id) => bundle.form.filter((f) => f.subject_id === id));
+  return ids.flatMap((id) => bundle.form.filter((f) => f.subject_id === id && !f.numeric_span_id));
 }
 function short(text, n = 90) {
   return text.length > n ? text.slice(0, n - 1) + "…" : text;
@@ -744,7 +764,7 @@ function nextUnanswered() {
   const at = items.findIndex((f) => f.field_id === current);
   for (let k = 1; k <= items.length; k++) {
     const f = items[(at + k + items.length) % items.length];
-    if (!answered(f)) return f;
+    if (f.required && !answered(f)) return f;
   }
   return null;
 }
@@ -876,7 +896,15 @@ function fieldControl(f, div) {
     div.append(line);
   }
 }
+function quantityProgress() {
+  document.querySelectorAll("[data-quantity-subject]").forEach((node) => {
+    const quantities = bundle.form.filter((q) => q.numeric_span_id && q.subject_id === node.dataset.quantitySubject);
+    const verified = quantities.filter((q) => answers.judgments[q.field_id]?.value === true).length;
+    node.textContent = `Quantities verified: ${verified}/${quantities.length} · ${verified === quantities.length ? "all checked; overall judgment still required" : verified ? "partially verified" : "unverified"}`;
+  });
+}
 function progress() {
+  quantityProgress();
   const required = bundle.form.filter((f) => f.required);
   const done = required.filter(answered).length;
   const items = itemFields();
@@ -890,19 +918,19 @@ function progress() {
     `Judgment ${jAt >= 0 ? jAt + 1 : 1} of ${judgments.length} in this answer · ` +
     `${done} of ${required.length} required fields complete · ${optional} optional field${optional === 1 ? "" : "s"} · ${technical} completion control${technical === 1 ? "" : "s"}` +
     (at >= 0 ? ` · item ${at + 1} of ${items.length}` : "") +
-    (next ? ` · next unanswered: ${next.label}` : items.length ? " · every item answered; finish below" : "");
+    (next ? ` · next unanswered: ${next.label}` : items.length ? " · required items answered; finish below" : "");
   const field = bundle.form.find((f) => f.field_id === current);
   const j = field && answers.judgments[field.field_id];
   const missing = [];
-  if (j && field.note_required_unless.length && !field.note_required_unless.includes(j.value) && !j.note.trim()) missing.push("explanation");
-  if (j && field.evidence_required && !j.selections.length) missing.push("source passage");
+  if (j && (field.required || j.value !== "") && field.note_required_unless.length && !field.note_required_unless.includes(j.value) && !j.note.trim()) missing.push("explanation");
+  if (j && (field.required || j.value !== "") && field.evidence_required && !j.selections.length) missing.push("source passage");
   if (missing.length) $("progress").textContent += " · Pending: " + missing.join(" and ");
   const button = $("next-item");
   if (button) button.textContent = next ? "Next unanswered item" : "Go to finish";
 }
 function showSubmissionBlockers() {
   const box = $("submission-blockers");
-  const pending = bundle.form.filter((f) => f.required && !answered(f));
+  const pending = bundle.form.filter((f) => (f.required || (answers.judgments[f.field_id] && answers.judgments[f.field_id].value !== "")) && !answered(f));
   box.replaceChildren(el("p", `${pending.length} fields need attention before submission. Your decisions are unchanged.`));
   pending.forEach((f) => {
     const j = answers.judgments[f.field_id];
@@ -922,7 +950,8 @@ function showSubmissionBlockers() {
 function renderForms() {
   const items = itemFields();
   if (current === null || !items.some((f) => f.field_id === current))
-    current = (items.find((f) => !answered(f)) || items[0] || {}).field_id ?? null;
+    current = (items.find((f) => f.required && !answered(f)) || items.find((f) => f.required) || {}).field_id ?? null;
+  if (!items.some((f) => f.required) && current === null) $("item-navigation").open = false;
   $("item-links").replaceChildren();
   claimLinks(bundle.form.find((f) => f.field_id === current));
   $("items").replaceChildren();
@@ -935,7 +964,7 @@ function renderForms() {
       const saved = j && j.value !== "";
       const pending = j && f.note_required_unless.length && !f.note_required_unless.includes(j.value) && !j.note.trim()
         ? "needs explanation" : "incomplete";
-      const state = answered(f) ? "answered" : saved ? `selected · ${pending}` : "unanswered";
+      const state = answered(f) ? "answered" : saved ? `selected · ${pending}` : f.required ? "unanswered" : "optional";
       const open = el(
         "button",
         `${i + 1}. ${f.label} · ${state}${item ? " · " + short(item.text, 70) : ""}`,
@@ -953,6 +982,11 @@ function renderForms() {
       div.append(el("p", isReference(f.subject_id) ? "Reference item:" : "Statement under review:"));
       div.append(linkedStatement(item.text, f.subject_id));
       div.append(el("small", isReference(f.subject_id) ? "Coverage: decide whether the answer addresses this reference." : "Evidence support: decide whether the source supports the statement as written."));
+    }
+    const quantities = bundle.form.filter((q) => q.numeric_span_id && q.subject_id === f.subject_id);
+    if (quantities.length) {
+      const summary = el("p"); summary.dataset.quantitySubject = f.subject_id;
+      div.append(summary);
     }
     fieldControl(f, div);
     const nav = el("div");
@@ -973,7 +1007,7 @@ function renderForms() {
   });
   $("forms").replaceChildren();
   bundle.form
-    .filter((f) => !f.subject_id)
+    .filter((f) => !f.subject_id && !f.numeric_span_id)
     .forEach((f) => {
       const div = el("div");
       div.className = "field";

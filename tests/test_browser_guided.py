@@ -219,3 +219,32 @@ def test_coverage_checkbox_stays_with_claim_when_source_preview_adds_ui_text(tmp
         assert choice.locator("..").evaluate("e => e.nextElementSibling?.className || null") == "report-text"
         page.locator(".report-text").get_by_role("button", name="Preview evidence for 24.6%", exact=True).click()
         expect(page.get_by_label("Current item")).to_contain_text("Coverage: R1")
+
+
+def test_optional_annotations_do_not_block_or_lead_the_workflow(tmp_path):
+    b = guided_bundle()
+    for f in b.form:
+        if f.subject_id:
+            f.required = False
+    store = FileStore(tmp_path)
+    with open_review(b, store, launch=False) as h, sync_playwright() as pw:
+        page = pw.chromium.launch().new_page()
+        page.goto(h.url)
+        page.get_by_label("Assessor", exact=True).fill("Synthetic reviewer")
+        expect(page.locator("#items").get_by_label("Current item")).to_have_count(0)
+        assert not page.locator("#item-navigation").evaluate("node => node.open")
+        page.locator("#item-navigation").evaluate("node => node.open = true")
+        page.get_by_role("button", name="23. Coverage: R1 · optional").click()
+        page.get_by_role("region", name="Report", exact=True).get_by_role("checkbox", name="C1: Statement 1").check()
+        page.get_by_label("Explanation: Coverage: R1", exact=True).fill("Unfinished diagnostic note")
+        page.get_by_label("Is the full answer assessable?", exact=True).select_option("complete")
+        page.get_by_label("Full review complete", exact=True).check()
+        page.get_by_role("button", name="Submit review", exact=True).click()
+        expect(page.locator("#status")).to_contain_text("Submitted")
+        saved = store.load_task(b.bundle_id)
+        assert saved["last_submission"] is not None
+        optional = saved["answers"]["judgments"]["coverage:R1"]
+        assert optional["value"] == ""
+        assert optional["claim_ids"] == ["C1"]
+        assert optional["note"] == "Unfinished diagnostic note"
+        assert not any(j["value"] for key,j in saved["answers"]["judgments"].items() if key.startswith(("support:","coverage:")))

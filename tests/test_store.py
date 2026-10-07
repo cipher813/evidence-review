@@ -133,3 +133,29 @@ def test_required_boolean_no_is_valid_but_completion_must_be_true(tmp_path):
     a["judgments"]["report_complete"]["value"] = False
     with pytest.raises(ValueError, match="required"):
         s.save_submission(b, 1, "incomplete", a, "Ada", 0, "revise")
+
+def test_optional_unanswered_annotation_is_preserved_but_not_a_verdict(tmp_path):
+    b = example_bundle()
+    b.form[0].required = False
+    b.form[0].note_required_unless = ["supported"]
+    b.form[0].evidence_required = True
+    s = FileStore(tmp_path)
+    s.register(b)
+    a = answer()
+    a["judgments"]["support:margin"] = {"value": "", "claim_ids": [b.claims[0].claim_id]}
+    s.save_submission(b, 0, "optional", a, "Ada")
+    saved = s.export_submission(b.bundle_id, 1).judgments["support:margin"]
+    assert saved.value == ""
+    assert saved.claim_ids == [b.claims[0].claim_id]
+    a["judgments"]["support:margin"]["value"] = "invalid"
+    with pytest.raises(ValueError, match="option"):
+        s.save_submission(b, 1, "invalid", a, "Ada", 0, "check")
+    a["judgments"]["support:margin"] = {"value": "", "claim_ids": ["forged"]}
+    with pytest.raises(ValueError, match="unknown selected claim"):
+        s.save_submission(b, 1, "forged", a, "Ada", 0, "check")
+    a["judgments"]["support:margin"] = {"value": "", "selections": [{
+        "source_id": b.sources[0].source_id, "source_hash": b.sources[0].sha256,
+        "start_line": 4, "end_line": 4, "excerpt": "forged",
+    }]}
+    with pytest.raises(ValueError, match="selection"):
+        s.save_submission(b, 1, "forged-evidence", a, "Ada", 0, "check")

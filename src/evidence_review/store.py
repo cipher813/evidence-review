@@ -76,10 +76,13 @@ def validate_answers(bundle, answers, complete=False):
     sources = {s.source_id: s for s in bundle.sources}
     for key, j in judgments.items():
         field = fields[key]
+        # Optional notes/selections may be retained without inventing a verdict.
+        # Subject and source validation below still applies to these annotations.
+        unanswered_optional = not field.required and j.value == ""
         if (
             field.kind == "choice"
             and j.value not in field.options
-            and (complete or j.value != "")
+            and ((complete and field.required) or j.value != "")
         ):
             raise ValueError("unknown option")
         if field.kind == "boolean" and type(j.value) is not bool:
@@ -90,15 +93,17 @@ def validate_answers(bundle, answers, complete=False):
             raise ValueError("unknown selected claim")
         if (
             complete
+            and not unanswered_optional
             and field.note_required_unless
             and j.value not in field.note_required_unless
             and not j.note.strip()
         ):
             raise ValueError(f"explanation required: {key}")
-        if complete and field.evidence_required and not j.selections:
+        if complete and not unanswered_optional and field.evidence_required and not j.selections:
             raise ValueError(f"evidence required: {key}")
         if (
             complete
+            and not unanswered_optional
             and bundle.task_kind == "adjudication"
             and not field.require_true
             and not j.note.strip()
@@ -114,6 +119,13 @@ def validate_answers(bundle, answers, complete=False):
                 or (field.kind == "text" and not str(j.value).strip())
             ):
                 raise ValueError(f"required field: {field.field_id}")
+    if complete:
+        for field in bundle.form:
+            verdict = judgments.get(field.field_id)
+            if verdict and verdict.value in field.numeric_verification_values:
+                quantities = [q for q in bundle.form if q.numeric_span_id and q.subject_id == field.subject_id]
+                if any(q.field_id not in judgments or judgments[q.field_id].value is not True for q in quantities):
+                    raise ValueError(f"unchecked quantity: {field.field_id}")
     if len({d.defect_id for d in defects}) != len(defects):
         raise ValueError("duplicate defect identity")
     for d in defects:
