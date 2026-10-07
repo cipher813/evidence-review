@@ -1,5 +1,44 @@
 {
   "$defs": {
+    "AtomBinding": {
+      "additionalProperties": false,
+      "description": "One caller-declared non-numeric factual proposition inside an answer field.\n\nQuantities keep their legacy ``numeric_span_id`` binding; this binds a check\ncontrol to exactly one fact occurrence, identified by its exact offsets.",
+      "properties": {
+        "atom_id": {
+          "pattern": "^atom:[0-9a-f]{24}$",
+          "title": "Atom Id",
+          "type": "string"
+        },
+        "field_path": {
+          "title": "Field Path",
+          "type": "string"
+        },
+        "start": {
+          "minimum": 0,
+          "title": "Start",
+          "type": "integer"
+        },
+        "end": {
+          "exclusiveMinimum": 0,
+          "title": "End",
+          "type": "integer"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "atom_id",
+        "field_path",
+        "start",
+        "end",
+        "text"
+      ],
+      "title": "AtomBinding",
+      "type": "object"
+    },
     "Calculation": {
       "additionalProperties": false,
       "properties": {
@@ -237,6 +276,17 @@
           },
           "title": "Option Help",
           "type": "object"
+        },
+        "atom": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AtomBinding"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [

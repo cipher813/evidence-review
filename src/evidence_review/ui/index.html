@@ -8,8 +8,9 @@
   </head>
   <body>
     <header>
-      <h1>Evidence Review</h1>
+      <h1 id="review-type">Evidence Review</h1>
       <p id="task"></p>
+      <p id="workload-summary" aria-label="Assigned workload" hidden></p>
       <label>Assessor <input id="assessor" autocomplete="name" /></label>
       <p id="status" role="status" aria-live="polite" aria-label="Local save status">
         Loading…
@@ -44,6 +45,7 @@
         <p>Follow the task instructions and rubric. Check statement support, required-issue coverage, reference validity or finding validity as assigned; record explicit defects separately.</p>
         <p id="progress" role="status" aria-live="polite" aria-label="Review progress"></p>
         <div id="submission-blockers" aria-label="Submission requirements" role="alert" hidden></div>
+        <div id="atoms" aria-label="Atomic source checks" hidden></div>
         <div id="items"></div>
         <details id="item-navigation" open><summary>Review items</summary><div id="item-links"></div></details>
         <h3>Finish</h3>
@@ -59,6 +61,7 @@
       </section>
       <section class="review-pane" aria-label="Evidence" tabindex="0">
         <h2>Source evidence</h2>
+        <div id="viewer" aria-label="Rendered source viewer" tabindex="-1" hidden></div>
         <details id="evidence-panel">
         <summary>Preview evidence and search frozen sources</summary>
         <div>
@@ -74,6 +77,8 @@
         </div>
       </details>
       </section>
+      <div id="pane-height-divider" class="layout-divider horizontal" role="separator" aria-label="Resize evidence height" aria-orientation="horizontal" tabindex="0"></div>
+      <div id="pane-width-divider" class="layout-divider vertical" role="separator" aria-label="Resize left pane width" aria-orientation="vertical" tabindex="0"></div>
     </main>
     <dialog id="review-guide" aria-label="Review guide">
       <button id="close-guide" type="button">Close review guide</button>

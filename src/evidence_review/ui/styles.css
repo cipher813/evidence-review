@@ -21,13 +21,13 @@ h1 {
 }
 main {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
-  grid-template-rows: minmax(0, .35fr) minmax(0, .65fr);
-  grid-template-areas: "evidence evidence" "report judgments";
+  grid-template-columns: minmax(0, var(--left-pane, 52.4fr)) 10px minmax(0, var(--right-pane, 47.6fr));
+  grid-template-rows: minmax(0, var(--top-pane, 35fr)) 10px minmax(0, var(--bottom-pane, 65fr));
+  grid-template-areas: "evidence evidence evidence" "height height height" "report width judgments";
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  gap: 1rem;
+  gap: 0;
   padding: 1rem;
 }
 section {
@@ -255,3 +255,58 @@ header label { margin: .25rem 0; }
 dialog { width: min(900px, 92vw); max-height: 90dvh; overflow: auto; border: 1px solid #879bad; border-radius: 8px; }
 dialog::backdrop { background: #17253466; }
 .info-link { border: 0; background: transparent; padding: .1rem .3rem; text-decoration: underline; }
+
+/* Keep each human check and evidence action inline with the reference prose. */
+.quantity-token { display: inline-flex; align-items: baseline; gap: .2em; white-space: nowrap; }
+.quantity-token .quantity-check { display: inline; margin: 0; }
+.quantity-check input { margin: 0; vertical-align: baseline; }
+.number.prepared { border-bottom: 2px solid #1f5f99; background: #e9f1fa; }
+.number.prepared::after { content: " ↗"; }
+
+.layout-divider { background: transparent; touch-action: none; position: relative; }
+.layout-divider::before { content: ""; position: absolute; background: #879bad; border-radius: 2px; }
+.layout-divider.horizontal { grid-area: height; cursor: row-resize; }
+.layout-divider.vertical { grid-area: width; cursor: col-resize; }
+.layout-divider.horizontal::before { height: 3px; width: 56px; top: 3px; left: calc(50% - 28px); }
+.layout-divider.vertical::before { width: 3px; height: 56px; left: 3px; top: calc(50% - 28px); }
+.layout-divider:focus-visible, .layout-divider:hover { background: #d9edff; outline: 2px solid #1f5f99; }
+body.resizing-panes { user-select: none; }
+.reference-evidence-links { line-height: 2; }
+@media(max-width:1000px) { .layout-divider { display: none; } main { gap: 1rem; } }
+
+[data-receipt-field] [hidden] { display: none; }
+
+/* atomic-source-check/v1: statements above, atom rows lower left, rendered source lower right. */
+body.atomic-mode main { grid-template-areas: "report report report" "height height height" "judgments width evidence"; }
+.atom-mark { display: inline; margin: 0; padding: 0 .1em; border: 0; border-bottom: 2px solid #1f5f99; border-radius: 0;
+  background: transparent; color: inherit; font: inherit; text-decoration: underline dotted; text-underline-offset: .25em; }
+.atom-mark.ambiguous, .atom-mark.unavailable, .atom-mark.unsupported { border-bottom-style: dashed; }
+.atom-row { border: 1px solid #bbc9d6; border-radius: 6px; padding: .4rem .6rem; margin: .4rem 0; }
+.atom-row.ambiguous, .atom-row.unavailable, .atom-row.unsupported { border-style: dashed; }
+.atom-head { display: flex; flex-wrap: wrap; gap: .3rem .6rem; align-items: baseline; }
+.atom-check { margin: 0; font-weight: 600; }
+.atom-state { font-size: .9em; color: #4c5e6b; }
+.atom-row.ambiguous .atom-state::before, .atom-row.unavailable .atom-state::before,
+.atom-row.unsupported .atom-state::before { content: "? "; font-weight: 700; }
+.atom-link { font-weight: 600; }
+#viewer { border: 1px solid #d3dde5; border-radius: 6px; padding: .5rem; margin-bottom: .6rem; }
+.viewer-head { display: flex; justify-content: space-between; align-items: baseline; gap: .5rem; flex-wrap: wrap; }
+.viewer-head h3 { margin: 0; }
+.target-status { font-weight: 600; }
+.rendered-doc { overflow: auto; max-width: 100%; }
+.rendered-doc .render-line { display: block; white-space: pre-wrap; }
+.rendered-doc pre .render-line { font-family: ui-monospace, monospace; }
+.rendered-doc .render-notice { font-style: italic; border-left: 3px solid #879bad; padding-left: .5rem; }
+/* Highlight is outline + weight + flag text, never colour alone. */
+.target-hit { outline: 3px solid #1f5f99; outline-offset: 2px; font-weight: 700; }
+tr.target-hit > * { font-weight: 700; }
+.target-candidate { outline: 2px dashed #a76f00; outline-offset: 2px; }
+.target-page { outline: 3px dashed #1f5f99; }
+.target-flag { display: inline-block; font-size: .8em; font-weight: 700; margin-right: .3em; border: 1px solid currentColor;
+  padding: 0 .2em; border-radius: 3px; }
+.target-candidate[data-candidate]::after { content: " [candidate " attr(data-candidate) "]"; font-size: .8em; }
+mark.cited-words { background: #fff0bc; text-decoration: underline; text-decoration-thickness: 2px; }
+.pdf-page { position: relative; border: 1px solid #879bad; background: #fff; margin: .5rem 0; flex: none; }
+.pdf-glyphs { position: absolute; white-space: pre; line-height: 1; font-family: Helvetica, Arial, sans-serif; }
+.pdf-page .render-notice { position: absolute; top: 1rem; left: 1rem; right: 1rem; }
+@media (max-width: 1000px) { body.atomic-mode main { grid-template-areas: "report" "judgments" "evidence"; } }

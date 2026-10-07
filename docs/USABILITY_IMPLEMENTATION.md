@@ -12,7 +12,11 @@ Acceptance baseline: nous-ergon-ops-PR1594, plan 2026-10-06-evidence-review-usab
 | 4 | Conservative readable tables, numbered fallback | Verified in package | Table cases include escaped pipes, blank boundary cells, duplicate labels and multirow headers |
 | 5 | Report plus one active judgment; unchanged decisions/durability | Verified in package | Browser/store/hook tests; same-subject fields remain reachable; pending notes/passages not completed |
 | 5a | Assigned workload, answer vs judgment counts | Package display verified; private companion owns filtering | Package display/private assignment tests |
-| 6 | Package/adapter qualification, release, real re-export and human pilot | Pending qualification | Human acceptance remains separate |
+| 6 | Package/adapter qualification, release, real re-export and human pilot | 0.5.0 qualified locally (docs/qualification/0.5.0.json); release and human pilot pending | Human acceptance remains separate |
+| 7 | Atomic rows: one stable row per number or declared fact, unresolved rows retained (2026-10-07 plan WP8) | Verified in package | tests/test_atomic_evidence.py |
+| 8 | One-click rendered target with exact, page-only or ambiguous highlight; offline sanitized rendering (WP9) | Verified on synthetic HTML, PDF and Markdown fixtures | tests/test_source_rendering.py, tests/test_browser_rendered_sources.py |
+| 9 | Three-pane source-check layout; clicks never check; keyboard, zoom and denied storage (WP10, WP4) | Verified in Chromium; screen reader and human pilot not performed | tests/test_atomic_source_workflow.py, tests/test_layout_recovery.py |
+| 10 | Late hook settlement failures are durable and sanitized (WP5) | Verified in package | tests/test_hooks.py |
 
 Baseline: origin/main 0d071b5 (0.3.0), 97 tests passed locally on macOS/Python 3.12.13. New table/context tests: 16 expected feature failures, 2 existing validation cases passed; then all 18 passed. Navigation/browser regressions: 4 failed on baseline, to be rechecked after implementation. Safe URL regressions: 4 failed on baseline.
 

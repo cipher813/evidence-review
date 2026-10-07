@@ -10,7 +10,11 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
 from urllib.parse import urlsplit, parse_qsl
+import re
+from .atomic_evidence import (ATOM_EVIDENCE_SCHEMA, RENDER_MANIFEST_SCHEMA, atom_view, build_atom_manifest,
+                              validate_atom_evidence, validate_render_manifest)
 from .contracts import ReviewWorkload, PACKAGE_VERSION, blind_terms, blind_violations, validate_bundle
+from .source_rendering import DERIVATIVE_SCHEMA, RenderedSourceAsset, check_derivative, render_frozen_text
 from .evidence import evidence_views, inventory, navigation_coverage
 from .store import Conflict, submission_matches_snapshot
 from .hooks import Hooks, run_hook
@@ -21,8 +25,30 @@ EVENT_KINDS = {
     "source_opened",
     "search",
     "passage_selected",
+    "checked_quantity_evidence_attached",
+    "reference_evidence_receipts_attached",
     "original_opened",
+    "rendered_target_opened",
+    "atom_row_expanded",
 }
+
+ATOMIC_SOURCE_CHECK = "atomic-source-check/v1"
+PRESENTATION_MODES = ("default", ATOMIC_SOURCE_CHECK)
+CONTRACTS = ("review-bundle/v1", "review-submission/v1", ATOM_EVIDENCE_SCHEMA, RENDER_MANIFEST_SCHEMA,
+             DERIVATIVE_SCHEMA)
+MAX_RENDER_RESPONSE = 8_000_000
+SAFE_SOURCE = re.compile(r"^[A-Za-z0-9_.:-]{1,160}$")
+SAFE_TARGET = re.compile(r"^tgt:[0-9a-f]{24}$")
+
+
+class UnsupportedContract(ValueError):
+    """A caller asked for a contract or mode this package version does not implement."""
+
+
+def capabilities():
+    """What this package version can validate and present; callers refuse rather than degrade silently."""
+    return {"package_version": PACKAGE_VERSION, "contracts": list(CONTRACTS),
+            "presentation_modes": list(PRESENTATION_MODES)}
 
 MAX_BODY = 2_000_000
 ASSETS = {
@@ -109,6 +135,11 @@ def open_review(
     blind_markers=(),
     source_links=None,
     workload=None,
+    required_fields_only=False,
+    atom_evidence=None,
+    rendered_sources=None,
+    presentation_mode="default",
+    require_contracts=(),
 ):
     """Serve one review task on loopback.
 
@@ -120,10 +151,32 @@ def open_review(
     current caller-owned display counts. It does not change frozen bundle identity.
     source_links may likewise be a callback for per-task eligible links.
 
+    required_fields_only hides optional form controls for independent tasks only.
+    It is presentation metadata: frozen bundles, validation and saved judgments
+    are unchanged. Other task kinds retain every control, including reference
+    quantity checks. Saved optional answers that block submission can be reopened.
+
+    atom_evidence (an atom-evidence/v1 manifest or a callback receiving the
+    active bundle) and rendered_sources (RenderedSourceAsset objects, or a
+    callback) are optional hash-bound sidecars; neither changes bundle or
+    submission identity. presentation_mode="atomic-source-check/v1" shows the
+    statements above, one row per atom on the left and the rendered source on
+    the right; sources without a supplied rendering get a labelled rendering
+    of their frozen text, and a bundle without atom evidence gets one quantity
+    row per asserted number. require_contracts names contracts the caller
+    depends on; an unsupported one is refused instead of silently ignored.
+
     source_links optionally maps source ids to their public originals (see
     ``source_link_map``); the UI offers each as a link that opens the original
     at the cited passage, so a reviewer can check the frozen copy against it.
     """
+    if type(required_fields_only) is not bool:
+        raise TypeError("required_fields_only must be a boolean")
+    if presentation_mode not in PRESENTATION_MODES:
+        raise UnsupportedContract(f"unsupported presentation mode: {presentation_mode}")
+    missing = [c for c in require_contracts if c not in CONTRACTS]
+    if missing:
+        raise UnsupportedContract("unsupported contract(s): " + ", ".join(map(str, missing)))
     markers = blind_terms(blind_markers)
 
     def checked(b):
@@ -144,8 +197,35 @@ def open_review(
             value = b.workload
         return ReviewWorkload.model_validate(value).model_dump(mode="json") if value is not None else None
 
+    def sidecars_for(b):
+        renders = {}
+        supplied = rendered_sources(b) if callable(rendered_sources) else rendered_sources
+        for asset in supplied or ():
+            if not isinstance(asset, RenderedSourceAsset):
+                raise TypeError("rendered_sources must contain RenderedSourceAsset objects")
+            check_derivative(asset.verify().derivative)
+            manifest = validate_render_manifest(b, asset.manifest)
+            if manifest.source_id in renders:
+                raise ValueError("two renderings supplied for one source")
+            renders[manifest.source_id] = asset
+        atoms = atom_evidence(b) if callable(atom_evidence) else atom_evidence
+        if atoms is not None:
+            atoms = validate_atom_evidence(b, atoms, [a.manifest for a in renders.values()])
+        if presentation_mode == ATOMIC_SOURCE_CHECK:
+            if atoms is None:
+                atoms = build_atom_manifest(b)
+            for s in b.sources:
+                if s.source_id not in renders:
+                    renders[s.source_id] = render_frozen_text(b, s.source_id, atoms)
+        if b.task_kind != "adjudication":
+            for asset in renders.values():
+                if blind_violations([asset.derivative, asset.manifest.model_dump(mode="json")], markers):
+                    raise BlindingViolation(f"rendered source {asset.manifest.source_id} exposes a blinded marker")
+        return {"atoms": atoms, "renders": renders}
+
     links = [links_for(bundle)]
     workload_for(bundle)  # Reject invalid initial display metadata before serving.
+    sidecars = [sidecars_for(bundle)]
     store.register(bundle)
     hooks = hooks or Hooks()
     token = secrets.token_urlsafe(32)
@@ -207,6 +287,9 @@ def open_review(
                 self.response(403, {"error": "authorization required"})
                 return
             with mutex:
+                if self.path.startswith("/api/source-render/") or self.path.startswith("/api/source-target/"):
+                    self.rendered()
+                    return
                 if self.path == "/api/bundle":
                     self.response(200, current[0].model_dump(mode="json"))
                 elif self.path == "/api/evidence":
@@ -222,6 +305,20 @@ def open_review(
                             "inventory": inventory(current[0]),
                             "navigation": navigation_coverage(current[0], links[0]),
                             "workload": display_workload,
+                            "presentation": {
+                                "required_fields_only": required_fields_only and current[0].task_kind == "independent",
+                                "mode": presentation_mode,
+                            },
+                            "capabilities": capabilities(),
+                            "atoms": atom_view(current[0], sidecars[0]["atoms"],
+                                               [a.manifest for a in sidecars[0]["renders"].values()])
+                            if sidecars[0]["atoms"] is not None else None,
+                            "rendered_sources": {
+                                sid: {k: a.manifest.model_dump(mode="json")[k] for k in (
+                                    "render_mode", "lineage", "fidelity_note", "derivative_sha256", "raw_sha256",
+                                    "frozen_sha256", "raw_media_type", "transforms")}
+                                for sid, a in sidecars[0]["renders"].items()
+                            },
                             "diagnostics": {
                                 "package_version": PACKAGE_VERSION,
                                 "bundle_hash": current[0].bundle_hash,
@@ -247,6 +344,38 @@ def open_review(
                     )
                 else:
                     self.response(404, {"error": "unknown path"})
+
+        def rendered(self):
+            """Protected rendered-source routes: allowlisted ids, current bundle only, re-verified bytes."""
+            kind, _, ident = self.path[len("/api/"):].partition("/")
+            renders = sidecars[0]["renders"]
+            if kind == "source-render":
+                if not SAFE_SOURCE.match(ident) or ident not in renders:
+                    self.response(404, {"error": "no rendered source with that id in this task"})
+                    return
+                asset = renders[ident]
+                try:
+                    asset.verify()
+                    check_derivative(asset.derivative)
+                except ValueError as exc:
+                    self.response(500, {"error": str(exc)})
+                    return
+                body = {"manifest": asset.manifest.model_dump(mode="json"), "derivative": asset.derivative}
+                if len(json.dumps(body, ensure_ascii=False)) > MAX_RENDER_RESPONSE:
+                    self.response(413, {"error": "rendered source exceeds the response bound"})
+                    return
+                self.response(200, body)
+                return
+            if not SAFE_TARGET.match(ident):
+                self.response(404, {"error": "invalid target id"})
+                return
+            for asset in renders.values():
+                target = next((t for t in asset.manifest.targets if t.target_id == ident), None)
+                if target is not None:
+                    self.response(200, {"target": target.model_dump(mode="json"),
+                                        "derivative_sha256": asset.manifest.derivative_sha256})
+                    return
+            self.response(404, {"error": "no rendered target with that id in this task"})
 
         def do_POST(self):
             if not self.authorized(post=True):
@@ -308,8 +437,10 @@ def open_review(
                         store.register(nxt)
                         next_links = links_for(nxt)
                         workload_for(nxt)
+                        next_sidecars = sidecars_for(nxt)
                         current[0] = nxt
                         links[0] = next_links
+                        sidecars[0] = next_sidecars
                         views[0] = evidence_views(nxt)
                         self.response(200, {"bundle": nxt.model_dump(mode="json")})
                         return

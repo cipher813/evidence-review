@@ -10,7 +10,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator, model_serializer
 
 
-PACKAGE_VERSION = "0.4.5"
+PACKAGE_VERSION = "0.5.0"
 
 
 def canonical_json(value) -> bytes:
@@ -234,6 +234,29 @@ class ReferenceItem(Strict):
     calculation: Calculation | None = None
 
 
+class AtomBinding(Strict):
+    """One caller-declared non-numeric factual proposition inside an answer field.
+
+    Quantities keep their legacy ``numeric_span_id`` binding; this binds a check
+    control to exactly one fact occurrence, identified by its exact offsets."""
+    atom_id: str = Field(pattern=r"^atom:[0-9a-f]{24}$")
+    field_path: str
+    start: int = Field(ge=0)
+    end: int = Field(gt=0)
+    text: str = Field(min_length=1)
+
+
+ATOM_CONTRACT = "atom/v1"
+
+
+def atom_identity(bundle_id, document_hashes, field_path, field_text, start, end, kind):
+    """Deterministic occurrence identity: the same words twice are two atoms."""
+    return "atom:" + digest({
+        "contract": ATOM_CONTRACT, "bundle_id": bundle_id, "documents": digest(document_hashes),
+        "field_path": field_path, "field_sha256": digest(field_text), "start": start, "end": end, "kind": kind,
+    })[:24]
+
+
 class FormField(Strict):
     field_id: str
     label: str
@@ -250,6 +273,8 @@ class FormField(Strict):
     # what each option means. Display only; never part of an answer's validity.
     help: str = ""
     option_help: dict[str, str] = Field(default_factory=dict)
+    # Explicit check of one declared fact atom (atomic source-check forms only).
+    atom: AtomBinding | None = None
 
 
     @model_serializer(mode="wrap")
@@ -258,6 +283,8 @@ class FormField(Strict):
         # Optional extension must not alter hashes of already sealed bundles.
         if self.numeric_span_id is None:
             data.pop("numeric_span_id", None)
+        if self.atom is None:
+            data.pop("atom", None)
         if not self.numeric_verification_values:
             data.pop("numeric_verification_values", None)
         return data
@@ -299,6 +326,7 @@ class ReviewBundle(Strict):
                 raise ValueError(f"duplicate {key}")
         spans_by_id = {s.span_id: s for s in self.spans}
         quantity_bindings = set()
+        atom_bindings = set()
         for field in self.form:
             if field.numeric_span_id:
                 span = spans_by_id.get(field.numeric_span_id)
@@ -309,10 +337,23 @@ class ReviewBundle(Strict):
                 if field.numeric_span_id in quantity_bindings:
                     raise ValueError("duplicate quantity verification binding")
                 quantity_bindings.add(field.numeric_span_id)
+            if field.atom:
+                a = field.atom
+                answer = {f.path: f for f in self.fields if f.role == "answer"}.get(a.field_path)
+                subjects = {c.claim_id for c in self.claims} | {r.reference_id for r in self.references}
+                if (field.numeric_span_id or field.kind != "boolean" or field.required or field.require_true
+                        or not field.subject_id or field.subject_id not in subjects or answer is None
+                        or a.end > len(answer.text) or a.start >= a.end or answer.text[a.start:a.end] != a.text
+                        or a.atom_id != atom_identity(self.bundle_id, self.document_hashes, a.field_path,
+                                                      answer.text, a.start, a.end, "fact")):
+                    raise ValueError("invalid atom verification binding")
+                if a.atom_id in atom_bindings:
+                    raise ValueError("duplicate atom verification binding")
+                atom_bindings.add(a.atom_id)
             if field.numeric_verification_values:
                 if (field.kind != "choice" or not field.subject_id
                         or set(field.numeric_verification_values) - set(field.options)
-                        or not any(q.numeric_span_id and q.subject_id == field.subject_id for q in self.form)):
+                        or not any((q.numeric_span_id or q.atom) and q.subject_id == field.subject_id for q in self.form)):
                     raise ValueError("invalid quantity verification verdict")
         sources = {s.source_id: s for s in self.sources}
         claims = {c.claim_id: c for c in self.claims}

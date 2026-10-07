@@ -53,3 +53,22 @@ Pass `source_links={source_id: {"url": ..., "line_url": ..., "label": ..., "note
 To bind evidence to an individual number, set `citations` (the located line or lines that hold the value) or `calculation` (formula plus operands, each with its own citation) on that `NumericSpan`. Span evidence is validated exactly like claim evidence. A number bound to a single located citation of a linked source renders as a link that opens that line of the original in a new tab and shows the same line in the evidence pane; a calculated number shows its formula and every input with its own link. Identifier spans cannot carry evidence.
 
 The judgments pane is guided: fields with a `subject_id` are items, worked one at a time. The current item shows its statement or reference text, `help` and the meaning of each option (`option_help`), its decision and note, and "Next unanswered item" (keys: `n` next unanswered, `p` previous, ignored while typing); opening a statement from the report or the subject list makes its decision current. Claim checkboxes appear only on items whose subject is a reference item (coverage), labelled with claim text. Fields without a subject are under Finish. Mark task material such as the research question with `ReportField(role="context")`: it is shown apart from the answer, and its spans must be `identifier` with no claims or evidence. `ReviewBundle.instructions` is shown at the top as "What to do".
+
+## Atomic source check and rendered sources (0.5.0)
+
+`evidence_review.capabilities()` returns the package version, the contracts it understands and its presentation modes. Pass `require_contracts=(...)` to `open_review` to refuse an older package before serving, and `presentation_mode="atomic-source-check/v1"` to show statements above, one row per atom on the left and the rendered source on the right. An unknown mode or contract raises `evidence_review.server.UnsupportedContract` instead of being ignored.
+
+- `atom_evidence` is an `atom-evidence/v1` manifest (or a callback taking the active bundle), built with `build_atom_manifest(bundle, facts)`. Quantities come from the bundle's own numeric inventory. Non-numeric facts are declared by the caller; the package never splits prose or decides support. In atomic mode, a missing manifest is built from the numeric inventory alone.
+- `rendered_sources` is a list of `RenderedSourceAsset` (or a callback). Build one with `prepare_render_asset(bundle, source_id, OriginalAsset(bytes, media_type), atoms)`. Markdown whose bytes equal the frozen text renders faithfully; HTML and PDF render as sanitized derivatives with their lineage stated; anything else falls back to a readable rendering of the frozen text. Each target is `exact`, `page_only`, `ambiguous` (every candidate shown, none chosen) or `unavailable`, and the viewer says which.
+- Atom checks are form fields: `numeric_span_id` for a quantity, `atom` (an `AtomBinding`) for a declared fact. A choice field's `numeric_verification_values` refuses those values until every check on the same subject is ticked. Opening a source never ticks a check.
+- Sidecars never change bundle or submission identity. A bundle without them behaves exactly as in 0.4.x.
+
+## Late hook results (0.5.0)
+
+A continuation result that arrives after its attempt was fenced is recorded, never applied. The task log gains one of three events, each with the error class only (no message, payload or token):
+
+- `hook_late_result_fenced`: a late result arrived and was ignored because a newer revision or attempt owns the task.
+- `hook_late_settlement_failed`: recording the late result itself failed; the event says `reconciliation_required`.
+- `hook_late_callback_error`: the late callback raised.
+
+If even the event cannot be written, the failure is kept in memory (`evidence_review.hooks.unpersisted_late_failures()`) and logged at error level, so it is never silent. Treat any of these as a prompt to run your `reconcile` callback and check your own receipt.

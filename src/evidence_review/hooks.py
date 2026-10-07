@@ -1,11 +1,22 @@
 """Caller-owned durable continuation, with no automatic retry of unknown side effects."""
 
+import logging
 import threading
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Callable
 
 STATUSES = ("pending", "succeeded", "failed", "unknown")
+LOG = logging.getLogger("evidence_review.hooks")
+# Sanitized process-level record of late settlements that could not be persisted at all.
+_UNPERSISTED = []
+_UNPERSISTED_LOCK = threading.Lock()
+
+
+def unpersisted_late_failures():
+    """Late-result settlement failures whose diagnostic event could not be written either."""
+    with _UNPERSISTED_LOCK:
+        return [dict(x) for x in _UNPERSISTED]
 
 
 def frozen(value):
@@ -130,6 +141,15 @@ def run_hook(store, task_id, revision, hooks=None, reconcile=False):
                 done.wait()
                 if "result" in box:
                     _record_late(store, task_id, revision, attempt, claim, box["result"])
+                elif "error" in box:
+                    # The callback finished by raising: still unknown remotely, but say so.
+                    try:
+                        store.append_event(task_id, {
+                            "kind": "hook_late_callback_error", "subject": f"revision {revision} attempt {attempt}",
+                            "revision": revision, "attempt": attempt, "verification": False,
+                            "error_class": type(box["error"]).__name__, "reconciliation_required": True})
+                    except Exception:
+                        LOG.error("late hook error for task %s not persisted", task_id)
 
             threading.Thread(target=late, daemon=True).start()
             return state
@@ -144,8 +164,19 @@ def run_hook(store, task_id, revision, hooks=None, reconcile=False):
 
 
 def _record_late(store, task_id, revision, attempt, claim, status):
+    """Settle a late callback result; every non-recorded outcome stays observable.
+
+    A fenced result (a newer revision, attempt or reconciliation owns the
+    record) is expected and logged as ``hook_late_result_fenced``. Any other
+    exception is ``hook_late_settlement_failed`` with the error class only:
+    never the callback payload, source text or token. Neither is promoted to
+    success and nothing is replayed; reconciliation remains available."""
+    from .store import Conflict
+
+    base = {"subject": f"revision {revision} attempt {attempt}", "revision": revision, "attempt": attempt,
+            "verification": False}
     try:
-        store.settle_hook(
+        _, recorded = store.settle_hook(
             task_id,
             revision,
             attempt,
@@ -153,5 +184,19 @@ def _record_late(store, task_id, revision, attempt, claim, status):
             {**status, "reason": "late result: " + (status.get("reason") or "")},
             late=True,
         )
-    except Exception:
-        pass  # A stale late result is dropped; reconciliation remains available.
+        if recorded:
+            return
+        event = {**base, "kind": "hook_late_result_fenced", "reconciliation_required": False}
+    except Conflict:
+        event = {**base, "kind": "hook_late_result_fenced", "reconciliation_required": False}
+    except Exception as exc:
+        event = {**base, "kind": "hook_late_settlement_failed", "error_class": type(exc).__name__,
+                 "reconciliation_required": True}
+    try:
+        store.append_event(task_id, event)
+    except Exception as again:
+        failure = {**event, "task_id": task_id, "event_error_class": type(again).__name__}
+        with _UNPERSISTED_LOCK:
+            _UNPERSISTED.append(failure)
+        LOG.error("late hook settlement for task %s revision %s attempt %s not persisted (%s; event %s)",
+                  task_id, revision, attempt, event.get("error_class", "fenced"), type(again).__name__)

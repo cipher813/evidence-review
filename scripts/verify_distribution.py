@@ -33,6 +33,7 @@ def verify_scope(root, coverage):
 
 def verify_wheel(root, wheel):
     from evidence_review.contracts import ReviewBundle, ReviewSubmission
+    from evidence_review.atomic_evidence import AtomEvidenceManifest, SourceRenderManifest
 
     with zipfile.ZipFile(wheel) as archive:
         for path in (root / "src/evidence_review").rglob("*"):
@@ -49,6 +50,8 @@ def verify_wheel(root, wheel):
         for cls, name in (
             (ReviewBundle, "review-bundle-v1.json"),
             (ReviewSubmission, "review-submission-v1.json"),
+            (AtomEvidenceManifest, "atom-evidence-v1.json"),
+            (SourceRenderManifest, "source-render-manifest-v1.json"),
         ):
             schema = json.loads(archive.read("evidence_review/schemas/" + name))
             if schema != cls.model_json_schema() or schema != json.loads(
