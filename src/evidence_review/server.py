@@ -22,6 +22,7 @@ EVENT_KINDS = {
     "search",
     "passage_selected",
     "checked_quantity_evidence_attached",
+    "reference_evidence_receipts_attached",
     "original_opened",
 }
 

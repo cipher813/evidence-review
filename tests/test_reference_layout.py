@@ -163,3 +163,32 @@ def test_receipts_preserve_missing_evidence_and_candidate_gates(tmp_path, mode):
         expect(page.locator('#status')).to_contain_text('evidence required')
         assert store.load_task(b.bundle_id)['answers']['judgments'][b.form[0].field_id]['selections']==[]
         browser.close()
+
+
+@pytest.mark.parametrize("verdict", ["needs correction", "cannot determine"])
+def test_explained_negative_reference_submits_without_checking_quantities(tmp_path, verdict):
+    b=reference_quantity_bundle()
+    f=b.form[0]
+    f.options=["verified","needs correction","cannot determine"]
+    f.option_help={}
+    f.numeric_verification_values=["verified"]
+    f.note_required_unless=["verified"]
+    f.evidence_required=True
+    b=validate_bundle(b.model_dump(mode='json'))
+    store=FileStore(tmp_path)
+    with open_review(b,store,launch=False,assessor='Scratch') as h,sync_playwright() as pw:
+        browser=pw.chromium.launch();page=browser.new_page()
+        page.goto(h.url);page.wait_for_selector('#items select')
+        page.locator('#items select').first.select_option(verdict)
+        page.locator('#items textarea').fill('The cited evidence does not establish this quantity.')
+        page.locator('#forms input[type=checkbox]').check()
+        page.locator('#submit').click()
+        expect(page.locator('#status')).to_contain_text('Submitted')
+        saved=store.load_task(b.bundle_id)['answers']['judgments']
+        assert saved[f.field_id]['value']==verdict and saved[f.field_id]['selections']
+        assert saved.get('quantity',{}).get('value') is not True
+        expect(page.locator('#items input[data-quantity-field]').first).not_to_be_checked()
+        page.reload();page.wait_for_selector('#items select')
+        expect(page.locator('#items select').first).to_have_value(verdict)
+        expect(page.locator('#items')).to_contain_text('not verification')
+        browser.close()

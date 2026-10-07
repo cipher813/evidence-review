@@ -191,12 +191,16 @@ for (const event of ["pointerdown", "keydown", "input"])
     lastInteraction = performance.now();
   });
 setInterval(account, 1000);
-function checkedReferenceEvidence(f) {
+function referenceEvidenceReceipts(f) {
   const j = answers.judgments[f.field_id];
-  if (bundle.task_kind !== "reference" || !j ||
-      !(f.numeric_verification_values || []).includes(j.value)) return [];
+  if (bundle.task_kind !== "reference" || !j || !f.subject_id || f.numeric_span_id ||
+      f.kind !== "choice" || !f.options.includes(j.value)) return [];
   const quantities = bundle.form.filter((q) => q.numeric_span_id && q.subject_id === f.subject_id);
-  if (!quantities.length || quantities.some((q) => answers.judgments[q.field_id]?.value !== true)) return [];
+  const verifiedQuantities = (f.numeric_verification_values || []).includes(j.value);
+  const explainedConcern = f.note_required_unless.length && !f.note_required_unless.includes(j.value);
+  if (explainedConcern && !j.note.trim()) return [];
+  if (verifiedQuantities && quantities.some((q) => answers.judgments[q.field_id]?.value !== true)) return [];
+  if (quantities.length && !verifiedQuantities && !explainedConcern) return [];
   const receipts = new Map();
   const addCitation = (c) => {
     const source = bundle.sources.find((s) => s.source_id === c.source_id);
@@ -227,13 +231,18 @@ function checkedReferenceEvidence(f) {
       located = addCalculation(row?.calculation) || located;
     }
     // Evidence receipts are bookkeeping for explicit checks, never new verdicts.
-    if (!located) return [];
+    if (verifiedQuantities && !located) return [];
+  }
+  if (!quantities.length || explainedConcern) {
+    const reference = bundle.references.find((r) => r.reference_id === f.subject_id);
+    for (const citation of reference?.citations || []) addCitation(citation);
+    addCalculation(reference?.calculation);
   }
   return [...receipts.values()];
 }
-function attachCheckedReferenceEvidence() {
+function attachReferenceEvidenceReceipts() {
   for (const f of bundle.form) {
-    const receipts = checkedReferenceEvidence(f);
+    const receipts = referenceEvidenceReceipts(f);
     if (!receipts.length) continue;
     const j = judgment(f.field_id);
     let added = 0;
@@ -244,11 +253,11 @@ function attachCheckedReferenceEvidence() {
         j.selections.push(receipt); added++;
       }
     }
-    if (added) logEvent("checked_quantity_evidence_attached", f.field_id);
+    if (added) logEvent("reference_evidence_receipts_attached", f.field_id + ":" + j.value);
   }
 }
 function save(submit = false) {
-  attachCheckedReferenceEvidence();
+  attachReferenceEvidenceReceipts();
   const snapshot = structuredClone(answers);
   const elapsed = active;
   active = 0;
@@ -863,7 +872,7 @@ function answered(f) {
       bundle.form.some((q) => q.numeric_span_id && q.subject_id === f.subject_id &&
         answers.judgments[q.field_id]?.value !== true)) return false;
   if (f.note_required_unless.length && !f.note_required_unless.includes(j.value) && !j.note.trim()) return false;
-  if (f.evidence_required && !j.selections.length && !checkedReferenceEvidence(f).length) return false;
+  if (f.evidence_required && !j.selections.length && !referenceEvidenceReceipts(f).length) return false;
   return f.kind === "text" ? String(j.value).trim() !== "" : j.value !== "";
 }
 function itemFields() {
@@ -989,8 +998,8 @@ function fieldControl(f, div) {
   div.append(note);
   if (f.subject_id && isReference(f.subject_id) && bundle.task_kind !== "reference")
     div.append(el("p", "Select the claims that address this issue in the report pane."));
-  if (bundle.task_kind === "reference" && f.numeric_verification_values?.length)
-    div.append(el("p", "When every quantity is checked and this reference is verified, its exact source passages are attached automatically on save. Additional passage attachments are optional."));
+  if (bundle.task_kind === "reference")
+    div.append(el("p", "Source context is attached automatically for an explained correction or uncertainty. This does not verify it or check quantities. A verified verdict still requires every quantity checked. Additional passage attachments are optional."));
   const attach = el("button", "Attach selected source passage");
   attach.onclick = () => {
     if (!selection) {
@@ -1006,7 +1015,7 @@ function fieldControl(f, div) {
     const line = el("p", `${s.source_id} L${s.start_line}–L${s.end_line}: ${s.excerpt}`);
     const remove = el("button", "Remove passage");
     remove.onclick = () => {
-      if (checkedReferenceEvidence(f).some((receipt) => receipt.source_id === s.source_id &&
+      if (referenceEvidenceReceipts(f).some((receipt) => receipt.source_id === s.source_id &&
           receipt.source_hash === s.source_hash && receipt.start_line === s.start_line &&
           receipt.end_line === s.end_line)) {
         progress();
@@ -1035,11 +1044,18 @@ function quantityProgress() {
 function progress() {
   document.querySelectorAll("[data-receipt-field]").forEach((controls) => {
     const field = bundle.form.find((f) => f.field_id === controls.dataset.receiptField);
-    const automatic = field && checkedReferenceEvidence(field).some((s) =>
+    const automatic = field && referenceEvidenceReceipts(field).some((s) =>
       JSON.stringify([s.source_id, s.source_hash, s.start_line, s.end_line]) === controls.dataset.receiptKey);
     controls.querySelector("button").hidden = Boolean(automatic);
     controls.querySelector("button").disabled = Boolean(automatic);
     controls.querySelector("small").hidden = !automatic;
+    const concern = field && field.note_required_unless.length &&
+      !field.note_required_unless.includes(answers.judgments[field.field_id]?.value);
+    const numeric = field && (field.numeric_verification_values || []).includes(answers.judgments[field.field_id]?.value) &&
+      bundle.form.some((q) => q.numeric_span_id && q.subject_id === field.subject_id);
+    controls.querySelector("small").textContent = concern || !numeric
+      ? " · Automatic frozen-source context; not verification"
+      : " · Automatic evidence receipt for checked quantities";
   });
 
   quantityProgress();
@@ -1061,7 +1077,7 @@ function progress() {
   const j = field && answers.judgments[field.field_id];
   const missing = [];
   if (j && (field.required || j.value !== "") && field.note_required_unless.length && !field.note_required_unless.includes(j.value) && !j.note.trim()) missing.push("explanation");
-  if (j && (field.required || j.value !== "") && field.evidence_required && !j.selections.length && !checkedReferenceEvidence(field).length) missing.push("source passage");
+  if (j && (field.required || j.value !== "") && field.evidence_required && !j.selections.length && !referenceEvidenceReceipts(field).length) missing.push("source passage");
   if (missing.length) $("progress").textContent += " · Pending: " + missing.join(" and ");
   const button = $("next-item");
   if (button) button.textContent = next ? "Next unanswered item" : "Go to finish";
