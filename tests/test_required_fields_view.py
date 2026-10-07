@@ -61,6 +61,8 @@ def test_required_view_counts_only_visible_work_and_preserves_hidden_answers(tmp
         browser = pw.chromium.launch()
         page = browser.new_page()
         page.goto(handle.url)
+        expect(page.locator("header").get_by_role("heading", name="Answer grading", exact=True)).to_be_visible()
+        expect(page.locator("#task")).to_have_text(bundle.bundle_id)
         expect(page.locator("header")).to_contain_text("Answer 1 of 9")
         if enabled:
             expect(page.locator("#status")).to_contain_text("0/2 required fields answered")
@@ -121,6 +123,25 @@ def test_required_only_never_hides_reference_quantity_checks(tmp_path):
         browser = pw.chromium.launch()
         page = browser.new_page()
         page.goto(handle.url)
+        expect(page.locator("header").get_by_role("heading", name="Source verification", exact=True)).to_be_visible()
+        expect(page.locator("#task")).to_have_text(bundle.bundle_id)
         expect(page.locator("#items input[data-quantity-field]")).to_have_count(1)
         expect(page.locator("#items input[data-quantity-field]").first).to_be_visible()
         browser.close()
+
+
+@pytest.mark.parametrize("kind,heading", [
+    ("adjudication", "Disagreement review"), ("finding", "Finding review"),
+])
+def test_header_names_the_active_review_without_changing_blinded_id(tmp_path, kind, heading):
+    bundle = optional_bundle()
+    bundle.task_kind = kind
+    original_hash = bundle.bundle_hash
+    with open_review(bundle, FileStore(tmp_path), launch=False) as handle, sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page()
+        page.goto(handle.url)
+        expect(page.locator("header").get_by_role("heading", name=heading, exact=True)).to_be_visible()
+        expect(page.locator("#task")).to_have_text(bundle.bundle_id)
+        browser.close()
+    assert bundle.bundle_hash == original_hash

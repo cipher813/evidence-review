@@ -1268,7 +1268,13 @@ function renderDefects() {
   });
 }
 function render() {
-  $("task").textContent = bundle.bundle_id + " · " + bundle.task_kind;
+  $("review-type").textContent = {
+    independent: "Answer grading",
+    reference: "Source verification",
+    adjudication: "Disagreement review",
+    finding: "Finding review",
+  }[bundle.task_kind] || "Evidence Review";
+  $("task").textContent = bundle.bundle_id;
   $("workload").replaceChildren();
   $("workload-summary").textContent = "";
   $("workload-summary").hidden = true;
