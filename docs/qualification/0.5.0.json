@@ -1,0 +1,52 @@
+{
+  "schema_version": "evidence-review-qualification/v1",
+  "package_version": "0.5.0",
+  "source_tree_sha1": "5870daf427c4d078fcb4e48875ca14b4b1c884c2",
+  "verified_source_commit": "d5d1c7be4d43cbe153f4f69e99a7a98bb9ee0804",
+  "wheel": "evidence_review-0.5.0-py3-none-any.whl",
+  "wheel_sha256": "d632095ad622b4c9b8e9dfbe6e5c3c6681f71d5647ab3f1e6f9c57f37d5a808d",
+  "reproducible_wheel": true,
+  "clean_noneditable_install": true,
+  "installed_files": {
+    "evidence_review/__init__.py": "7b515f7cf32f21d354190c893fede574af4becd1a84566a2fd7da92e17b7bba4",
+    "evidence_review/atomic_evidence.py": "7e86881c0df4c43df690cf8aafa023426610c45ecd40fa3281e2ca3f4a0295cb",
+    "evidence_review/cli.py": "ae2523bed0d08a47a12f07ef04446d98b113765d000774008296b77e9e728aba",
+    "evidence_review/contracts.py": "260261becf30823559aa42a9249661f90b03b4cbd144bfe72f656822802a74e9",
+    "evidence_review/evidence.py": "c980729526e0f47aa5228067dd16b36233b42725d82d19697aaf88ab6c31a3db",
+    "evidence_review/example.py": "478de2b2076833ddf05255596f38ead575f02849f0db8cde727515a808b1c030",
+    "evidence_review/hooks.py": "9937ea39705b8227c8c3c84be08b9d3f1cdeaafa89dd8cfc573556949647c24e",
+    "evidence_review/schemas/atom-evidence-v1.json": "b342b2f798110df3f084533d4252b15b0aba941c2a476dbe445d23aa8267a1ea",
+    "evidence_review/schemas/review-bundle-v1.json": "8c5e3bedbd3b902f069b184f0aabf308f80c4553d04390a409ad4f8a013c0f67",
+    "evidence_review/schemas/review-submission-v1.json": "7e1918b1f9742cca9dd4a7de7e0ce939e6cb597e8776bc4ede3dc5b5e98e8819",
+    "evidence_review/schemas/source-render-manifest-v1.json": "349f9efa77bda8d47d6d31ed9fbb1ad800986b6def688ef8298c82182655bb07",
+    "evidence_review/server.py": "deca0a61e2c05806bf407075c231f73472e4227f02bd0fed1f094f5db8607efa",
+    "evidence_review/source_rendering.py": "e7e59fb9b04ad3cc9d7663151c01ea9b9ea313c438875c7274ad8bd49d6adf63",
+    "evidence_review/store.py": "5a9fcfaff3df5bd4ef7c1c282e2b630159122790d0d7d3578f5d705447b3b70b",
+    "evidence_review/table_context.py": "f2953f2a869bf16da716badac5cb24a01d0e606ba30670fa334916cfe365cb2c",
+    "evidence_review/ui/app.js": "4f4d0a53af126a28619951f0ebf8b2c568c95c4a1590c1101fd9b950dbb9f86c",
+    "evidence_review/ui/index.html": "01183c345dc7c412526ee199494ae25fbab7c84595a5e9d54bbe9e12313ad823",
+    "evidence_review/ui/styles.css": "dcb99d062e8c7390ed1fd1f5dbc9a2a36dae7bfabe36cdcb417acb7447a7ce1f"
+  },
+  "installed_content_sha256": "5ce4d3fbe91db9001c6216974c31de4fa8d90af63bbd56c4e477d5de7922210d",
+  "schemas": {
+    "atom-evidence-v1.json": "b342b2f798110df3f084533d4252b15b0aba941c2a476dbe445d23aa8267a1ea",
+    "review-bundle-v1.json": "8c5e3bedbd3b902f069b184f0aabf308f80c4553d04390a409ad4f8a013c0f67",
+    "review-submission-v1.json": "7e1918b1f9742cca9dd4a7de7e0ce939e6cb597e8776bc4ede3dc5b5e98e8819",
+    "source-render-manifest-v1.json": "349f9efa77bda8d47d6d31ed9fbb1ad800986b6def688ef8298c82182655bb07"
+  },
+  "tests_passed": 252,
+  "coverage_percent": 92.48,
+  "verified_by_automation": [
+    "contracts, atom/render sidecars and capability negotiation",
+    "offline rendering of Markdown, HTML and PDF fixtures with exact, page-only and ambiguous targets",
+    "three-pane atomic source-check layout in Chromium at 1400x900 and 640x400 (200% zoom)",
+    "zero outbound requests and no executable markup from hostile HTML",
+    "late hook results fenced and their failures recorded as sanitized events"
+  ],
+  "unverified": [
+    "human usability and reviewer effort (no pilot run)",
+    "assistive technology with a real screen reader",
+    "real-corpus HTML/PDF originals (only synthetic fixtures were rendered)",
+    "hosted CI and release publishing for this version"
+  ]
+}
