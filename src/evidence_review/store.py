@@ -119,6 +119,13 @@ def validate_answers(bundle, answers, complete=False):
                 or (field.kind == "text" and not str(j.value).strip())
             ):
                 raise ValueError(f"required field: {field.field_id}")
+    if complete:
+        for field in bundle.form:
+            verdict = judgments.get(field.field_id)
+            if verdict and verdict.value in field.numeric_verification_values:
+                quantities = [q for q in bundle.form if q.numeric_span_id and q.subject_id == field.subject_id]
+                if any(q.field_id not in judgments or judgments[q.field_id].value is not True for q in quantities):
+                    raise ValueError(f"unchecked quantity: {field.field_id}")
     if len({d.defect_id for d in defects}) != len(defects):
         raise ValueError("duplicate defect identity")
     for d in defects:

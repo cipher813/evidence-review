@@ -195,6 +195,25 @@
           "default": null,
           "title": "Subject Id"
         },
+        "numeric_span_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Numeric Span Id"
+        },
+        "numeric_verification_values": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Numeric Verification Values",
+          "type": "array"
+        },
         "evidence_required": {
           "default": false,
           "title": "Evidence Required",

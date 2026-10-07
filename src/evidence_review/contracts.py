@@ -7,7 +7,7 @@ import re
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Literal
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator, model_serializer
 
 
 PACKAGE_VERSION = "0.4.5"
@@ -242,12 +242,25 @@ class FormField(Strict):
     required: bool = True
     require_true: bool = False
     subject_id: str | None = None
+    numeric_span_id: str | None = None
+    numeric_verification_values: list[str] = Field(default_factory=list)
     evidence_required: bool = False
     note_required_unless: list[str] = Field(default_factory=list)
     # Plain-language guidance shown with the control: what the question asks and
     # what each option means. Display only; never part of an answer's validity.
     help: str = ""
     option_help: dict[str, str] = Field(default_factory=dict)
+
+
+    @model_serializer(mode="wrap")
+    def preserve_legacy_fields(self, handler):
+        data = handler(self)
+        # Optional extension must not alter hashes of already sealed bundles.
+        if self.numeric_span_id is None:
+            data.pop("numeric_span_id", None)
+        if not self.numeric_verification_values:
+            data.pop("numeric_verification_values", None)
+        return data
 
 
 class ReviewBundle(Strict):
@@ -284,6 +297,23 @@ class ReviewBundle(Strict):
         for items, key in groups:
             if len({getattr(i, key) for i in items}) != len(items):
                 raise ValueError(f"duplicate {key}")
+        spans_by_id = {s.span_id: s for s in self.spans}
+        quantity_bindings = set()
+        for field in self.form:
+            if field.numeric_span_id:
+                span = spans_by_id.get(field.numeric_span_id)
+                if (span is None or span.state == "identifier" or field.kind != "boolean"
+                        or field.required or field.require_true or not field.subject_id
+                        or field.subject_id not in span.claim_ids):
+                    raise ValueError("invalid quantity verification binding")
+                if field.numeric_span_id in quantity_bindings:
+                    raise ValueError("duplicate quantity verification binding")
+                quantity_bindings.add(field.numeric_span_id)
+            if field.numeric_verification_values:
+                if (field.kind != "choice" or not field.subject_id
+                        or set(field.numeric_verification_values) - set(field.options)
+                        or not any(q.numeric_span_id and q.subject_id == field.subject_id for q in self.form)):
+                    raise ValueError("invalid quantity verification verdict")
         sources = {s.source_id: s for s in self.sources}
         claims = {c.claim_id: c for c in self.claims}
         expected = [
