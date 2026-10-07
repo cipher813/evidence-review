@@ -12,6 +12,7 @@ let bundle,
   selection = null,
   subject = null,
   current = null,
+  revealedFields = new Set(),
   active = 0,
   conflicted = false,
   last = performance.now(),
@@ -95,12 +96,19 @@ function matchesSubmitted(candidate, assessor) {
   return prior && prior.complete && prior.bundle_hash === state.bundle_hash && prior.assessor === assessor
     && !differences(candidate, { judgments: prior.judgments, defects: prior.defects }).length;
 }
+function requiredFieldsOnly() {
+  return evidence.presentation?.required_fields_only === true;
+}
+function presentationFields() {
+  return bundle.form.filter((f) => !requiredFieldsOnly() || f.required || revealedFields.has(f.field_id));
+}
 function status() {
-  const completed = Object.keys(answers.judgments).length;
+  const fields = requiredFieldsOnly() ? bundle.form.filter((f) => f.required) : bundle.form;
+  const completed = fields.filter((f) => Object.hasOwn(answers.judgments, f.field_id)).length;
   const hook = state.hook;
   $("status").className = "";
   $("status").textContent =
-    `${matchesSubmitted(answers, $("assessor").value.trim()) ? "Submitted" : "Draft"}: Saved locally · revision ${state.revision} · ${completed}/${bundle.form.length} fields answered`;
+    `${matchesSubmitted(answers, $("assessor").value.trim()) ? "Submitted" : "Draft"}: Saved locally · revision ${state.revision} · ${completed}/${fields.length} ${requiredFieldsOnly() ? "required " : ""}fields answered`;
   // Consumer backup/import status is never folded into the local save message.
   const submitted = state.last_submission
     ? `submitted revision ${state.last_submission}`
@@ -876,8 +884,9 @@ function answered(f) {
   return f.kind === "text" ? String(j.value).trim() !== "" : j.value !== "";
 }
 function itemFields() {
-  const ids = [...new Set(bundle.form.filter((f) => f.subject_id).map((f) => f.subject_id))];
-  return ids.flatMap((id) => bundle.form.filter((f) => f.subject_id === id && !f.numeric_span_id));
+  const fields = presentationFields();
+  const ids = [...new Set(fields.filter((f) => f.subject_id).map((f) => f.subject_id))];
+  return ids.flatMap((id) => fields.filter((f) => f.subject_id === id && !f.numeric_span_id));
 }
 function short(text, n = 90) {
   return text.length > n ? text.slice(0, n - 1) + "…" : text;
@@ -1070,7 +1079,9 @@ function progress() {
   const jAt = judgments.findIndex((f) => f.field_id === current);
   $("progress").textContent =
     `Judgment ${jAt >= 0 ? jAt + 1 : 1} of ${judgments.length} in this answer · ` +
-    `${done} of ${required.length} required fields complete · ${optional} optional field${optional === 1 ? "" : "s"} · ${technical} completion control${technical === 1 ? "" : "s"}` +
+    `${done} of ${required.length} required fields complete` +
+    (requiredFieldsOnly() ? "" : ` · ${optional} optional field${optional === 1 ? "" : "s"}`) +
+    ` · ${technical} completion control${technical === 1 ? "" : "s"}` +
     (at >= 0 ? ` · item ${at + 1} of ${items.length}` : "") +
     (next ? ` · next unanswered: ${next.label}` : items.length ? " · required items answered; finish below" : "");
   const field = bundle.form.find((f) => f.field_id === current);
@@ -1092,8 +1103,11 @@ function showSubmissionBlockers() {
     const b = el("button", `${note ? "Add explanation" : "Complete field"}: ${f.label}`);
     b.onclick = () => {
       box.hidden = true;
+      // Existing optional decisions are preserved and still validated. Reveal
+      // their repair controls only when the reviewer follows an actual blocker.
+      revealedFields.add(f.field_id);
       if (f.subject_id) goTo(f.field_id);
-      else $("field-" + f.field_id)?.focus();
+      else { renderForms(); $("field-" + f.field_id)?.focus(); }
       if (note) document.querySelector(`[aria-label="Explanation: ${CSS.escape(f.label)}"]`)?.focus();
     };
     box.append(b);
@@ -1106,6 +1120,7 @@ function renderForms() {
   if (current === null || !items.some((f) => f.field_id === current))
     current = (items.find((f) => f.required && !answered(f)) || items.find((f) => f.required) || {}).field_id ?? null;
   if (!items.some((f) => f.required) && current === null) $("item-navigation").open = false;
+  $("item-navigation").hidden = requiredFieldsOnly() && !items.length;
   $("item-links").replaceChildren();
   claimLinks(bundle.form.find((f) => f.field_id === current));
   $("items").replaceChildren();
@@ -1165,7 +1180,7 @@ function renderForms() {
     $("items").append(div);
   });
   $("forms").replaceChildren();
-  bundle.form
+  presentationFields()
     .filter((f) => !f.subject_id && !f.numeric_span_id)
     .forEach((f) => {
       const div = el("div");
@@ -1255,9 +1270,13 @@ function renderDefects() {
 function render() {
   $("task").textContent = bundle.bundle_id + " · " + bundle.task_kind;
   $("workload").replaceChildren();
+  $("workload-summary").textContent = "";
+  $("workload-summary").hidden = true;
   if (evidence.workload || bundle.workload) {
     const w = evidence.workload || bundle.workload;
     const label = ["independent", "adjudication"].includes(bundle.task_kind) ? "Answer" : "Task";
+    $("workload-summary").textContent = `${label} ${w.answer_index} of ${w.assigned_answers}`;
+    $("workload-summary").hidden = false;
     $("workload").append(el("p", `${label} ${w.answer_index} of ${w.assigned_answers} assigned`),
       el("p", Object.entries(w.task_counts).map(([kind,n]) => `${kind}: ${n}`).join(" · ")),
       el("p", "Why assigned: " + w.assignment_reason));
@@ -1282,7 +1301,7 @@ function render() {
   const refs = el("details"); refs.append(el("summary", `Required-issue / reference checklist (${bundle.references.length})`));
   bundle.references.forEach((r, i) => refs.append(el("p", `Required issue ${i + 1} (${r.reference_id}): ${r.text}`))); guide.append(refs);
   const rubric = el("details"); rubric.append(el("summary", "Review rubric and judgment definitions"));
-  bundle.form.forEach((f) => {
+  presentationFields().forEach((f) => {
     rubric.append(el("h4", f.label), el("p", f.help));
     Object.entries(f.option_help || {}).forEach(([option, meaning]) => rubric.append(el("p", `${option}: ${meaning}`)));
   }); guide.append(rubric);
@@ -1331,6 +1350,7 @@ async function load() {
   conflicted = false;
   $("conflict").hidden = true;
   answers = structuredClone(state.answers);
+  revealedFields.clear();
   $("assessor").value =
     state.assessor ||
     state.suggested_assessor ||

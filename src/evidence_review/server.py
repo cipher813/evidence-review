@@ -111,6 +111,7 @@ def open_review(
     blind_markers=(),
     source_links=None,
     workload=None,
+    required_fields_only=False,
 ):
     """Serve one review task on loopback.
 
@@ -122,10 +123,17 @@ def open_review(
     current caller-owned display counts. It does not change frozen bundle identity.
     source_links may likewise be a callback for per-task eligible links.
 
+    required_fields_only hides optional form controls for independent tasks only.
+    It is presentation metadata: frozen bundles, validation and saved judgments
+    are unchanged. Other task kinds retain every control, including reference
+    quantity checks. Saved optional answers that block submission can be reopened.
+
     source_links optionally maps source ids to their public originals (see
     ``source_link_map``); the UI offers each as a link that opens the original
     at the cited passage, so a reviewer can check the frozen copy against it.
     """
+    if type(required_fields_only) is not bool:
+        raise TypeError("required_fields_only must be a boolean")
     markers = blind_terms(blind_markers)
 
     def checked(b):
@@ -224,6 +232,9 @@ def open_review(
                             "inventory": inventory(current[0]),
                             "navigation": navigation_coverage(current[0], links[0]),
                             "workload": display_workload,
+                            "presentation": {
+                                "required_fields_only": required_fields_only and current[0].task_kind == "independent",
+                            },
                             "diagnostics": {
                                 "package_version": PACKAGE_VERSION,
                                 "bundle_hash": current[0].bundle_hash,
