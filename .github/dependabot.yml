@@ -8,6 +8,16 @@ updates:
     groups:
       dependencies:
         patterns: ['*']
+    # hatchling is the build backend, pinned in [build-system].requires and in
+    # the hash-locked build-requirements.txt. It is not in uv.lock, so the uv
+    # updater's `uv lock --upgrade-package hatchling` cannot change the lockfile
+    # and fails the whole run with dependency_file_content_not_changed
+    # ("Expected lockfile to change!"). Bump it by hand: build-requirements.in,
+    # [build-system].requires, build-requirements.txt (uv pip compile) and the
+    # pin asserted in tests/test_delivery.py. CI's pip-audit --strict over
+    # build-requirements.txt still fails on a hatchling advisory.
+    ignore:
+      - dependency-name: hatchling
   - package-ecosystem: github-actions
     directory: /
     schedule:
