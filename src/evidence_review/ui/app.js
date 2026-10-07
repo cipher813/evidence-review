@@ -612,13 +612,17 @@ function linkedStatement(text, subjectId) {
 }
 function showSpan(span, follow = true) {
   if (bundle.task_kind === "reference") {
-    subject = span.claim_ids.length === 1 ? span.claim_ids[0] : null;
+    subject = bundle.form.find((f) => f.numeric_span_id === span.span_id)?.subject_id
+      || bundle.form.find((f) => f.field_id === current)?.subject_id || null;
     selection = null;
   }
   $("evidence-panel").open = true;
   logEvent("span_opened", span.span_id);
   if (bundle.task_kind === "reference" && span.prepared_evidence?.length) {
-    $("evidence").replaceChildren(el("h3", span.text + ": source evidence"));
+    const returnReference = subject;
+    const back = el("button", "All evidence links"); back.onclick = () => referenceEvidenceList(returnReference);
+    $("evidence").replaceChildren(back, el("h3", span.text + ": source evidence"));
+    document.querySelector('[aria-label="Evidence"]').scrollTop = 0;
     if (span.context) {
       const c = span.context;
       $("evidence").append(el("p", [c.metric, c.entity, c.period, c.unit].filter(Boolean).join(" · ")));
@@ -734,6 +738,25 @@ function showSpan(span, follow = true) {
   }
   renderDiagnostics(span, $("evidence"));
 }
+function referenceEvidenceList(id) {
+  subject = id || null; selection = null;
+  $("evidence-panel").open = true;
+  $("evidence").replaceChildren(el("h3", "Evidence for this reference"),
+    el("p", "Open a quantity to inspect its exact source or calculation inputs."));
+  const links = el("div"); links.className = "reference-evidence-links";
+  bundle.form.filter((f) => f.numeric_span_id && f.subject_id === id).forEach((f) => {
+    const span = bundle.spans.find((s) => s.span_id === f.numeric_span_id);
+    links.append(numberAction(span, false), document.createTextNode(" "));
+  });
+  $("evidence").append(links);
+  const item = [...bundle.references, ...bundle.claims].find((r) => (r.reference_id || r.claim_id) === id);
+  if (item) {
+    const facts = el("button", "Supporting factual evidence");
+    facts.onclick = () => showSubject(item, id, false);
+    $("evidence").append(facts);
+  }
+  document.querySelector('[aria-label="Evidence"]').scrollTop = 0;
+}
 function renderReport() {
   const report = $("report");
   if (bundle.task_kind === "reference") {
@@ -816,10 +839,7 @@ function goTo(fieldId, focus = true) {
   const f = bundle.form.find((x) => x.field_id === fieldId);
   const item = f && subjectOf(f);
   if (item && bundle.task_kind !== "reference") showSubject(item, f.subject_id, false);
-  if (bundle.task_kind === "reference") {
-    subject = f?.subject_id || null; selection = null;
-    $("evidence").replaceChildren(el("p", "Click a quantity on the right to inspect its exact source evidence or calculation inputs."));
-  }
+  if (bundle.task_kind === "reference") referenceEvidenceList(f?.subject_id);
   renderForms();
   if (focus) $("field-" + fieldId)?.focus();
 }
@@ -1186,7 +1206,7 @@ function render() {
   renderForms();
   const first = bundle.form.find((f) => f.field_id === current);
   if (first && subjectOf(first) && bundle.task_kind !== "reference") showSubject(subjectOf(first), first.subject_id, false);
-  if (bundle.task_kind === "reference") $("evidence").replaceChildren(el("p", "Click a quantity on the right to inspect its exact source evidence or calculation inputs."));
+  if (bundle.task_kind === "reference") referenceEvidenceList(first?.subject_id);
   $("evidence-panel").open = true;
   renderDefects();
   $("subjects").replaceChildren();
@@ -1344,6 +1364,82 @@ window.addEventListener("beforeunload", (event) => {
     event.returnValue = "";
   }
 });
+function setupPaneDividers() {
+  const main = document.querySelector("main");
+  const prefs = { left: 52.4, top: 35 };
+  const storageKey = "evidence-review-pane-sizes/v1";
+  const layoutStatus = el("span"); layoutStatus.setAttribute("role", "status");
+  document.querySelector("header").append(layoutStatus);
+  try {
+    const saved = JSON.parse(localStorage.getItem(storageKey) || "null");
+    if (saved && Number.isFinite(saved.left) && Number.isFinite(saved.top)) {
+      prefs.left = Math.max(15, Math.min(85, saved.left));
+      prefs.top = Math.max(15, Math.min(85, saved.top));
+    }
+  } catch (error) {
+    // Preferences are optional; judgments remain durable. Report storage failure.
+    layoutStatus.textContent = "Pane-size preference unavailable; using default layout.";
+  }
+  const apply = () => {
+    main.style.setProperty("--left-pane", prefs.left + "fr");
+    main.style.setProperty("--right-pane", (100 - prefs.left) + "fr");
+    main.style.setProperty("--top-pane", prefs.top + "fr");
+    main.style.setProperty("--bottom-pane", (100 - prefs.top) + "fr");
+  };
+  const persist = () => {
+    try { localStorage.setItem(storageKey, JSON.stringify(prefs)); }
+    catch (error) {
+      // Layout still works in this tab; expose missing reload persistence.
+      layoutStatus.textContent = "Pane sizes changed for this tab; browser could not save the layout.";
+    }
+  };
+  [["pane-height-divider", "top", "y"], ["pane-width-divider", "left", "x"]].forEach(([id, key, axis]) => {
+    const divider = $(id);
+    let dragging = false;
+    const update = (value) => {
+      const bounds = main.getBoundingClientRect();
+      const style = getComputedStyle(main);
+      const available = (axis === "x" ? bounds.width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+        : bounds.height - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom)) - 10;
+      const limit = Math.min(45, Math.max(15, 100 * (axis === "x" ? 200 : 140) / available));
+      prefs[key] = Math.max(limit, Math.min(100 - limit, value));
+      divider.setAttribute("aria-valuemin", String(Math.round(limit)));
+      divider.setAttribute("aria-valuemax", String(Math.round(100 - limit)));
+      divider.setAttribute("aria-valuenow", String(Math.round(prefs[key])));
+      divider.setAttribute("aria-valuetext", Math.round(prefs[key]) + " percent");
+      apply();
+    };
+    divider.onpointerdown = (event) => {
+      if (event.button !== 0) return;
+      dragging = true; divider.setPointerCapture(event.pointerId);
+      document.body.classList.add("resizing-panes"); event.preventDefault();
+    };
+    divider.onpointermove = (event) => {
+      if (!dragging) return;
+      const bounds = main.getBoundingClientRect(); const style = getComputedStyle(main);
+      const start = axis === "x" ? bounds.left + parseFloat(style.paddingLeft) : bounds.top + parseFloat(style.paddingTop);
+      const available = (axis === "x" ? bounds.width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+        : bounds.height - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom)) - 10;
+      update(100 * ((axis === "x" ? event.clientX : event.clientY) - start - 5) / available);
+    };
+    const stop = () => {
+      if (!dragging) return;
+      dragging = false; document.body.classList.remove("resizing-panes"); persist();
+    };
+    divider.onpointerup = stop; divider.onlostpointercapture = stop;
+    divider.onkeydown = (event) => {
+      const decrease = axis === "x" ? "ArrowLeft" : "ArrowUp";
+      const increase = axis === "x" ? "ArrowRight" : "ArrowDown";
+      if (event.key !== decrease && event.key !== increase) return;
+      event.preventDefault(); update(prefs[key] + (event.key === decrease ? -1 : 1) * (event.shiftKey ? 10 : 2)); persist();
+    };
+    divider.ondblclick = () => { update(key === "left" ? 52.4 : 35); persist(); };
+    divider.title = "Drag to resize; arrow keys adjust; double-click restores default";
+    update(prefs[key]);
+  });
+  apply();
+}
+setupPaneDividers();
 load().catch((err) => {
   $("status").className = "save-error";
   $("status").textContent = err.message;

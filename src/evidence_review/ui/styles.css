@@ -21,13 +21,13 @@ h1 {
 }
 main {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
-  grid-template-rows: minmax(0, .35fr) minmax(0, .65fr);
-  grid-template-areas: "evidence evidence" "report judgments";
+  grid-template-columns: minmax(0, var(--left-pane, 52.4fr)) 10px minmax(0, var(--right-pane, 47.6fr));
+  grid-template-rows: minmax(0, var(--top-pane, 35fr)) 10px minmax(0, var(--bottom-pane, 65fr));
+  grid-template-areas: "evidence evidence evidence" "height height height" "report width judgments";
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  gap: 1rem;
+  gap: 0;
   padding: 1rem;
 }
 section {
@@ -262,3 +262,14 @@ dialog::backdrop { background: #17253466; }
 .quantity-check input { margin: 0; vertical-align: baseline; }
 .number.prepared { border-bottom: 2px solid #1f5f99; background: #e9f1fa; }
 .number.prepared::after { content: " ↗"; }
+
+.layout-divider { background: transparent; touch-action: none; position: relative; }
+.layout-divider::before { content: ""; position: absolute; background: #879bad; border-radius: 2px; }
+.layout-divider.horizontal { grid-area: height; cursor: row-resize; }
+.layout-divider.vertical { grid-area: width; cursor: col-resize; }
+.layout-divider.horizontal::before { height: 3px; width: 56px; top: 3px; left: calc(50% - 28px); }
+.layout-divider.vertical::before { width: 3px; height: 56px; left: 3px; top: calc(50% - 28px); }
+.layout-divider:focus-visible, .layout-divider:hover { background: #d9edff; outline: 2px solid #1f5f99; }
+body.resizing-panes { user-select: none; }
+.reference-evidence-links { line-height: 2; }
+@media(max-width:1000px) { .layout-divider { display: none; } main { gap: 1rem; } }
