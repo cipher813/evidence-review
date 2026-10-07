@@ -1,0 +1,316 @@
+{
+  "$defs": {
+    "AtomCitation": {
+      "additionalProperties": false,
+      "description": "A caller-declared located citation for a fact atom, validated against frozen text.",
+      "properties": {
+        "target_id": {
+          "pattern": "^tgt:[0-9a-f]{24}$",
+          "title": "Target Id",
+          "type": "string"
+        },
+        "citation": {
+          "$ref": "#/$defs/Citation"
+        }
+      },
+      "required": [
+        "target_id",
+        "citation"
+      ],
+      "title": "AtomCitation",
+      "type": "object"
+    },
+    "AtomEvidenceItem": {
+      "additionalProperties": false,
+      "properties": {
+        "atom_id": {
+          "pattern": "^atom:[0-9a-f]{24}$",
+          "title": "Atom Id",
+          "type": "string"
+        },
+        "bundle_hash": {
+          "title": "Bundle Hash",
+          "type": "string"
+        },
+        "field_path": {
+          "title": "Field Path",
+          "type": "string"
+        },
+        "start": {
+          "minimum": 0,
+          "title": "Start",
+          "type": "integer"
+        },
+        "end": {
+          "exclusiveMinimum": 0,
+          "title": "End",
+          "type": "integer"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "fact",
+            "quantity"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "claim_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Claim Ids",
+          "type": "array"
+        },
+        "numeric_span_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Numeric Span Id"
+        },
+        "form_field_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Form Field Id"
+        },
+        "evidence_state": {
+          "enum": [
+            "located",
+            "derived",
+            "ambiguous",
+            "unavailable",
+            "unsupported"
+          ],
+          "title": "Evidence State",
+          "type": "string"
+        },
+        "reason": {
+          "default": "",
+          "title": "Reason",
+          "type": "string"
+        },
+        "citation_target_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Citation Target Ids",
+          "type": "array"
+        },
+        "candidate_target_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Candidate Target Ids",
+          "type": "array"
+        },
+        "calculation_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Calculation Ref"
+        }
+      },
+      "required": [
+        "atom_id",
+        "bundle_hash",
+        "field_path",
+        "start",
+        "end",
+        "text",
+        "kind",
+        "evidence_state"
+      ],
+      "title": "AtomEvidenceItem",
+      "type": "object"
+    },
+    "Atomization": {
+      "additionalProperties": false,
+      "description": "How the caller split prose into atoms; reviewable, never inferred here.",
+      "properties": {
+        "method": {
+          "minLength": 1,
+          "title": "Method",
+          "type": "string"
+        },
+        "version": {
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        },
+        "record_sha256": {
+          "default": "",
+          "title": "Record Sha256",
+          "type": "string"
+        },
+        "coverage": {
+          "default": "complete",
+          "enum": [
+            "complete",
+            "assigned"
+          ],
+          "title": "Coverage",
+          "type": "string"
+        },
+        "scope_fields": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Scope Fields",
+          "type": "array"
+        },
+        "context_span_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Context Span Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "method",
+        "version"
+      ],
+      "title": "Atomization",
+      "type": "object"
+    },
+    "Citation": {
+      "additionalProperties": false,
+      "properties": {
+        "source_id": {
+          "title": "Source Id",
+          "type": "string"
+        },
+        "start_line": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start Line"
+        },
+        "end_line": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End Line"
+        },
+        "excerpt": {
+          "default": "",
+          "title": "Excerpt",
+          "type": "string"
+        },
+        "status": {
+          "default": "unavailable",
+          "enum": [
+            "located",
+            "unavailable",
+            "invalid_locator",
+            "excerpt_mismatch"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "reason": {
+          "default": "",
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_id"
+      ],
+      "title": "Citation",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "atom-evidence/v1",
+      "default": "atom-evidence/v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "atom_contract": {
+      "const": "atom/v1",
+      "default": "atom/v1",
+      "title": "Atom Contract",
+      "type": "string"
+    },
+    "bundle_id": {
+      "title": "Bundle Id",
+      "type": "string"
+    },
+    "bundle_hash": {
+      "title": "Bundle Hash",
+      "type": "string"
+    },
+    "atomization": {
+      "$ref": "#/$defs/Atomization"
+    },
+    "items": {
+      "items": {
+        "$ref": "#/$defs/AtomEvidenceItem"
+      },
+      "title": "Items",
+      "type": "array"
+    },
+    "citations": {
+      "items": {
+        "$ref": "#/$defs/AtomCitation"
+      },
+      "title": "Citations",
+      "type": "array"
+    },
+    "provenance": {
+      "default": "contemporaneous",
+      "enum": [
+        "contemporaneous",
+        "retrospective"
+      ],
+      "title": "Provenance",
+      "type": "string"
+    }
+  },
+  "required": [
+    "bundle_id",
+    "bundle_hash",
+    "atomization",
+    "items"
+  ],
+  "title": "AtomEvidenceManifest",
+  "type": "object"
+}

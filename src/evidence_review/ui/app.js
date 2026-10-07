@@ -877,7 +877,7 @@ function answered(f) {
   if (!j) return false;
   if (f.require_true && j.value !== true) return false;
   if ((f.numeric_verification_values || []).includes(j.value) &&
-      bundle.form.some((q) => q.numeric_span_id && q.subject_id === f.subject_id &&
+      bundle.form.some((q) => (q.numeric_span_id || q.atom) && q.subject_id === f.subject_id &&
         answers.judgments[q.field_id]?.value !== true)) return false;
   if (f.note_required_unless.length && !f.note_required_unless.includes(j.value) && !j.note.trim()) return false;
   if (f.evidence_required && !j.selections.length && !referenceEvidenceReceipts(f).length) return false;
@@ -886,7 +886,7 @@ function answered(f) {
 function itemFields() {
   const fields = presentationFields();
   const ids = [...new Set(fields.filter((f) => f.subject_id).map((f) => f.subject_id))];
-  return ids.flatMap((id) => fields.filter((f) => f.subject_id === id && !f.numeric_span_id));
+  return ids.flatMap((id) => fields.filter((f) => f.subject_id === id && !f.numeric_span_id && !f.atom));
 }
 function short(text, n = 90) {
   return text.length > n ? text.slice(0, n - 1) + "…" : text;
@@ -1181,7 +1181,7 @@ function renderForms() {
   });
   $("forms").replaceChildren();
   presentationFields()
-    .filter((f) => !f.subject_id && !f.numeric_span_id)
+    .filter((f) => !f.subject_id && !f.numeric_span_id && !f.atom)
     .forEach((f) => {
       const div = el("div");
       div.className = "field";
@@ -1347,6 +1347,7 @@ function render() {
   Object.entries(bundle.disclosures || {}).forEach(([label, text]) =>
     $("subjects").append(el("h3", label), el("pre", text)),
   );
+  if (atomicMode()) renderAtomic();
   status();
 }
 async function load() {
@@ -1417,6 +1418,8 @@ $("next").onclick = async () => {
   subject = null;
   current = null;
   $("evidence").replaceChildren();
+  renderCache.clear();
+  $("viewer").replaceChildren();
   await load();
 };
 $("use-saved").onclick = () => {
@@ -1484,6 +1487,253 @@ window.addEventListener("beforeunload", (event) => {
     event.preventDefault();
     event.returnValue = "";
   }
+});
+// ---- atomic-source-check/v1: statements above, one row per atom left, rendered source right.
+const renderCache = new Map();
+let viewerOrigin = null;
+function atomicMode() {
+  return evidence.presentation?.mode === "atomic-source-check/v1" && Boolean(evidence.atoms);
+}
+const ATOM_STATE = {
+  located: "Source located",
+  derived: "Calculated from inputs",
+  ambiguous: "Ambiguous: several candidate sources, none chosen",
+  unavailable: "No source located",
+  unsupported: "No supporting source identified",
+};
+function atomField(row) {
+  return row.form_field_id ? bundle.form.find((f) => f.field_id === row.form_field_id) : null;
+}
+function renderAtomicStatements() {
+  const report = $("report");
+  report.replaceChildren();
+  document.querySelector('[aria-label="Report"] > h2').textContent = "Statements under review (unedited)";
+  document.querySelector('[aria-label="Report"] > .legend').textContent =
+    "Exact saved text. Underlined passages are the atoms listed below; select one to go to its row.";
+  const rows = evidence.atoms.rows;
+  bundle.fields.filter((f) => f.role !== "context").forEach((f) => {
+    report.append(el("h3", f.label));
+    const p = el("div"); p.className = "report-text"; p.dataset.savedText = f.text;
+    const chars = Array.from(f.text);
+    let at = 0;
+    rows.filter((r) => r.field_path === f.path).sort((a, b) => a.start - b.start).forEach((r) => {
+      if (r.start < at) return; // Overlap is refused upstream; never redraw text twice.
+      p.append(document.createTextNode(chars.slice(at, r.start).join("")));
+      const mark = el("button", chars.slice(r.start, r.end).join(""));
+      mark.type = "button"; mark.className = "atom-mark " + r.evidence_state; mark.dataset.atomMark = r.atom_id;
+      mark.setAttribute("aria-label", `${r.text}: go to its check row (${ATOM_STATE[r.evidence_state]})`);
+      mark.onclick = () => document.querySelector(`[data-atom-row="${CSS.escape(r.atom_id)}"] .atom-focus`)?.focus();
+      p.append(mark);
+      at = r.end;
+    });
+    p.append(document.createTextNode(chars.slice(at).join("")));
+    report.append(p);
+  });
+  const context = evidence.atoms.atomization.context_span_ids.length;
+  if (context) report.append(el("p", `${context} other number${context === 1 ? " is" : "s are"} context only and not assigned for checking.`));
+}
+function describeTarget(t) {
+  if (!t) return "no target";
+  const where = t.page ? `page ${t.page}` : t.start_line ? (t.end_line && t.end_line !== t.start_line ? `L${t.start_line}–L${t.end_line}` : `L${t.start_line}`) : "";
+  const source = bundle.sources.find((s) => s.source_id === t.source_id);
+  return `${source ? source.title : t.source_id}${where ? " " + where : ""}`;
+}
+function renderAtomRows() {
+  const box = $("atoms");
+  box.hidden = false;
+  box.replaceChildren(el("h3", "Atomic source checks"),
+    el("p", evidence.atoms.verification_note + " Tick a box only after you have checked that atom against its source."));
+  evidence.atoms.rows.forEach((r, i) => {
+    const row = el("div"); row.className = "atom-row " + r.evidence_state; row.dataset.atomRow = r.atom_id;
+    row.setAttribute("role", "group"); row.setAttribute("aria-label", `Atom ${i + 1}: ${r.text}`);
+    const head = el("div"); head.className = "atom-head";
+    const field = atomField(r);
+    if (field) {
+      const label = el("label"); label.className = "atom-check";
+      const check = el("input"); check.type = "checkbox"; check.className = "atom-focus";
+      check.dataset[field.numeric_span_id ? "quantityField" : "atomField"] = field.field_id;
+      check.checked = answers.judgments[field.field_id]?.value === true;
+      check.setAttribute("aria-label", `Checked against the source: ${r.text}`);
+      check.onchange = () => {
+        judgment(field.field_id).value = check.checked;
+        document.querySelectorAll(`input[data-quantity-field="${CSS.escape(field.field_id)}"], input[data-atom-field="${CSS.escape(field.field_id)}"]`)
+          .forEach((other) => { other.checked = check.checked; });
+        save(); progress();
+      };
+      label.append(check, document.createTextNode(` ${i + 1}. “${r.text}”`));
+      head.append(label);
+    } else {
+      const label = el("span", `${i + 1}. “${r.text}”`); label.className = "atom-focus"; label.tabIndex = 0;
+      head.append(label, el("small", "No check control assigned for this atom."));
+    }
+    const state = el("span", (r.kind === "quantity" ? "Number · " : "Fact · ") + ATOM_STATE[r.evidence_state]);
+    state.className = "atom-state"; head.append(state);
+    const primary = r.targets[0];
+    if (primary) {
+      const link = el("button", "Open source: " + describeTarget(primary));
+      link.type = "button"; link.className = "atom-link";
+      link.setAttribute("aria-label", `Open the source for “${r.text}” at ${describeTarget(primary)}`);
+      link.onclick = () => openTarget(primary, link, r);
+      head.append(link);
+    }
+    if (r.reason) head.append(el("small", "Reason: " + r.reason));
+    row.append(head);
+    const more = el("details"); more.className = "atom-expand";
+    more.append(el("summary", r.calculation ? "Calculation, inputs and sources" : "Evidence details"));
+    more.ontoggle = () => { if (more.open) logEvent("atom_row_expanded", r.atom_id); };
+    if (r.calculation) {
+      renderCalculation(r.calculation, more, true, r.calculation.operands, true);
+      if (r.calculation_leaves.length) {
+        more.append(el("h4", "Input sources"));
+        r.calculation_leaves.forEach((leaf, k) => {
+          const line = el("p", `Input ${k + 1}: ${leaf.target ? describeTarget(leaf.target) : leaf.source_id} · ${leaf.status}${leaf.reason ? ": " + leaf.reason : ""}`);
+          if (leaf.target) {
+            const open = el("button", "Open input source");
+            open.setAttribute("aria-label", `Open input ${k + 1} source for “${r.text}”`);
+            open.onclick = () => openTarget(leaf.target, open, r);
+            line.append(open);
+          }
+          more.append(line);
+        });
+      }
+    }
+    if (r.numeric_span_id) {
+      const span = bundle.spans.find((s) => s.span_id === r.numeric_span_id);
+      if (span) renderDiagnostics(span, more);
+    }
+    r.candidates.forEach((t, k) => {
+      const line = el("p", `Candidate ${k + 1} of ${r.candidates.length}: ${describeTarget(t)} (not chosen)`);
+      const open = el("button", "Open candidate " + (k + 1));
+      open.setAttribute("aria-label", `Open candidate ${k + 1} for “${r.text}”`);
+      open.onclick = () => openTarget(t, open, r, `Candidate ${k + 1} of ${r.candidates.length}; no source was chosen`);
+      line.append(open); more.append(line);
+    });
+    r.targets.slice(1).forEach((t) => {
+      const open = el("button", "Open source: " + describeTarget(t));
+      open.onclick = () => openTarget(t, open, r); more.append(open);
+    });
+    if (r.claim_ids.length) more.append(el("small", "Statement ids: " + r.claim_ids.join(", ")));
+    more.append(el("small", `Atom ${r.atom_id} · offsets ${r.start}–${r.end} in ${r.field_path}`));
+    row.append(more);
+    box.append(row);
+  });
+}
+async function renderedSource(sourceId) {
+  if (!renderCache.has(sourceId)) renderCache.set(sourceId, api("/api/source-render/" + encodeURIComponent(sourceId)));
+  try { return await renderCache.get(sourceId); }
+  catch (err) { renderCache.delete(sourceId); throw err; }
+}
+function buildNode(node, ids) {
+  const tags = { line: "span", glyphs: "span", page: "div", notice: "p" };
+  const n = document.createElement(tags[node.tag] || node.tag);
+  n.dataset.renderId = node.id;
+  ids.set(node.id, n);
+  if (node.tag === "line") { n.className = "render-line"; n.dataset.line = String(node.line); }
+  if (node.tag === "notice") n.className = "render-notice";
+  if (node.line && node.tag !== "line") n.dataset.line = String(node.line);
+  Object.entries(node.attrs || {}).forEach(([k, v]) => n.setAttribute(k, v));
+  if (node.tag === "page") {
+    n.className = "pdf-page"; n.dataset.page = String(node.page);
+    n.setAttribute("role", "region"); n.setAttribute("aria-label", `Page ${node.page}`);
+    n.style.setProperty("width", node.width + "px"); n.style.setProperty("height", node.height + "px");
+  }
+  if (node.tag === "glyphs") {
+    n.className = "pdf-glyphs";
+    n.style.setProperty("left", node.x + "px"); n.style.setProperty("top", node.y + "px");
+    n.style.setProperty("font-size", node.size + "px");
+  }
+  if (typeof node.text === "string") n.textContent = node.text;
+  (node.children || []).forEach((child) => n.append(buildNode(child, ids)));
+  return n;
+}
+function markExcerpt(node, excerpt) {
+  // Non-colour emphasis on the cited words inside an exact node; text is never altered.
+  const words = (excerpt || "").replace(/\s+/g, " ").trim();
+  if (!words) return;
+  const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+  for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+    const at = t.data.indexOf(words);
+    if (at < 0 || t.data.indexOf(words, at + 1) >= 0) continue;
+    const range = document.createRange(); range.setStart(t, at); range.setEnd(t, at + words.length);
+    const mark = el("mark"); mark.className = "cited-words"; range.surroundContents(mark);
+    return;
+  }
+}
+async function openTarget(target, origin, row, note = "") {
+  const viewer = $("viewer");
+  viewerOrigin = origin;
+  viewer.hidden = false;
+  logEvent("rendered_target_opened", target.target_id);
+  if (!target.rendered) {
+    // No rendering for this citation: show the frozen lines rather than nothing.
+    const source = bundle.sources.find((s) => s.source_id === target.source_id);
+    viewer.replaceChildren(el("p", target.reason || "No rendered source for this citation."));
+    if (source) { $("evidence").replaceChildren(); showSource(source, target.start_line || 1, target.end_line || target.start_line || 1); }
+    return;
+  }
+  viewer.replaceChildren(el("p", "Opening source…"));
+  let data;
+  try { data = await renderedSource(target.source_id); }
+  catch (err) { viewer.replaceChildren(el("p", "Rendered source unavailable: " + err.message)); return; }
+  const m = data.manifest;
+  const record = m.targets.find((t) => t.target_id === target.target_id) || target;
+  const source = bundle.sources.find((s) => s.source_id === m.source_id);
+  const header = el("div"); header.className = "viewer-head";
+  const back = el("button", "Back to row"); back.type = "button";
+  back.onclick = () => viewerOrigin?.focus();
+  header.append(el("h3", source ? source.title : m.source_id), back);
+  const label = {exact: "Exact location highlighted", page_only: "Page-only location: the line is not highlighted",
+    ambiguous: "Ambiguous: several matches, none chosen", unavailable: "Location unavailable"}[record.status] || record.status;
+  const statusLine = el("p", `${label}${record.reason ? " · " + record.reason : ""}${note ? " · " + note : ""}`);
+  statusLine.className = "target-status"; statusLine.setAttribute("role", "status");
+  const fidelity = el("details"); fidelity.className = "render-fidelity";
+  fidelity.append(el("summary", `Rendering: ${m.render_mode.replaceAll("_", " ")} · ${m.lineage.replaceAll("_", " ")}`),
+    el("p", m.fidelity_note), el("small", `Frozen SHA-256 ${m.frozen_sha256}`),
+    el("small", m.raw_sha256 ? `Original SHA-256 ${m.raw_sha256} (${m.raw_media_type})` : "Original bytes not supplied"),
+    el("small", `Derivative SHA-256 ${m.derivative_sha256}`));
+  (m.transforms || []).forEach((t) => fidelity.append(el("small", "Transform: " + t)));
+  const doc = el("div"); doc.className = "rendered-doc " + m.render_mode; doc.setAttribute("aria-label", "Rendered source");
+  const ids = new Map();
+  data.derivative.nodes.forEach((n) => doc.append(buildNode(n, ids)));
+  viewer.replaceChildren(header, statusLine, fidelity, doc);
+  let first = null;
+  if (record.status === "exact") {
+    record.dom_targets.forEach((id) => {
+      const n = ids.get(id); if (!n) return;
+      n.classList.add("target-hit"); n.setAttribute("aria-current", "location");
+      if (n.tagName !== "TR") markExcerpt(n, record.excerpt);
+      first = first || n;
+    });
+  } else if (record.status === "page_only" && record.page) {
+    first = doc.querySelector(`[data-page="${record.page}"]`);
+    first?.classList.add("target-page");
+  } else if (record.status === "ambiguous") {
+    record.candidates.forEach((ids_, k) => ids_.forEach((id) => {
+      const n = ids.get(id); if (!n) return;
+      n.classList.add("target-candidate"); n.dataset.candidate = String(k + 1); first = first || n;
+    }));
+  }
+  if (first) {
+    const flag = el("span", record.status === "exact" ? "▶ cited" : record.status === "page_only" ? "▶ cited page" : "? candidate");
+    flag.className = "target-flag"; flag.setAttribute("aria-hidden", "true");
+    first.prepend(flag);
+    first.tabIndex = -1;
+    first.scrollIntoView({ block: "center" });
+    first.focus({ preventScroll: true });
+  } else statusLine.focus?.();
+}
+function renderAtomic() {
+  document.body.classList.add("atomic-mode");
+  document.querySelector('[aria-label="Judgments"] > h2').textContent = "Atomic checks and judgment";
+  document.querySelector('[aria-label="Evidence"] > h2').textContent = "Rendered source";
+  renderAtomicStatements();
+  renderAtomRows();
+  $("viewer").hidden = false;
+  $("evidence-panel").open = false;
+  if (!$("viewer").childElementCount) $("viewer").append(el("p", "Select “Open source” on a row to show its exact location here."));
+}
+$("viewer").addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && viewerOrigin) { event.preventDefault(); viewerOrigin.focus(); }
 });
 function setupPaneDividers() {
   const main = document.querySelector("main");

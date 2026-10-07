@@ -1,0 +1,241 @@
+{
+  "$defs": {
+    "RenderedSourceTarget": {
+      "additionalProperties": false,
+      "description": "One cited location mapped from frozen text into a rendered derivative.",
+      "properties": {
+        "target_id": {
+          "pattern": "^tgt:[0-9a-f]{24}$",
+          "title": "Target Id",
+          "type": "string"
+        },
+        "source_id": {
+          "pattern": "^[A-Za-z0-9_.:-]{1,160}$",
+          "title": "Source Id",
+          "type": "string"
+        },
+        "frozen_sha256": {
+          "title": "Frozen Sha256",
+          "type": "string"
+        },
+        "raw_sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Raw Sha256"
+        },
+        "start_line": {
+          "minimum": 1,
+          "title": "Start Line",
+          "type": "integer"
+        },
+        "end_line": {
+          "minimum": 1,
+          "title": "End Line",
+          "type": "integer"
+        },
+        "excerpt": {
+          "default": "",
+          "title": "Excerpt",
+          "type": "string"
+        },
+        "page": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page"
+        },
+        "bbox": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bbox"
+        },
+        "dom_targets": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Dom Targets",
+          "type": "array"
+        },
+        "candidates": {
+          "items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": "Candidates",
+          "type": "array"
+        },
+        "status": {
+          "enum": [
+            "exact",
+            "page_only",
+            "ambiguous",
+            "unavailable"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "reason": {
+          "default": "",
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "target_id",
+        "source_id",
+        "frozen_sha256",
+        "start_line",
+        "end_line",
+        "status"
+      ],
+      "title": "RenderedSourceTarget",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "source-render-manifest/v1",
+      "default": "source-render-manifest/v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "source_id": {
+      "pattern": "^[A-Za-z0-9_.:-]{1,160}$",
+      "title": "Source Id",
+      "type": "string"
+    },
+    "bundle_hash": {
+      "title": "Bundle Hash",
+      "type": "string"
+    },
+    "frozen_sha256": {
+      "title": "Frozen Sha256",
+      "type": "string"
+    },
+    "frozen_hash_algorithm": {
+      "const": "evidence-review/text-sha256-utf8",
+      "default": "evidence-review/text-sha256-utf8",
+      "title": "Frozen Hash Algorithm",
+      "type": "string"
+    },
+    "raw_sha256": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Raw Sha256"
+    },
+    "raw_media_type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Raw Media Type"
+    },
+    "render_mode": {
+      "enum": [
+        "faithful_markdown",
+        "faithful_html",
+        "pdf_text_layer",
+        "normalized_snapshot",
+        "unsupported"
+      ],
+      "title": "Render Mode",
+      "type": "string"
+    },
+    "lineage": {
+      "enum": [
+        "raw_matches_frozen",
+        "raw_differs_from_frozen",
+        "raw_derived_text",
+        "raw_unavailable"
+      ],
+      "title": "Lineage",
+      "type": "string"
+    },
+    "fidelity_note": {
+      "minLength": 1,
+      "title": "Fidelity Note",
+      "type": "string"
+    },
+    "derivative_sha256": {
+      "title": "Derivative Sha256",
+      "type": "string"
+    },
+    "mapping_sha256": {
+      "title": "Mapping Sha256",
+      "type": "string"
+    },
+    "renderer": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Renderer",
+      "type": "object"
+    },
+    "transforms": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Transforms",
+      "type": "array"
+    },
+    "targets": {
+      "items": {
+        "$ref": "#/$defs/RenderedSourceTarget"
+      },
+      "title": "Targets",
+      "type": "array"
+    }
+  },
+  "required": [
+    "source_id",
+    "bundle_hash",
+    "frozen_sha256",
+    "render_mode",
+    "lineage",
+    "fidelity_note",
+    "derivative_sha256",
+    "mapping_sha256",
+    "renderer"
+  ],
+  "title": "SourceRenderManifest",
+  "type": "object"
+}
