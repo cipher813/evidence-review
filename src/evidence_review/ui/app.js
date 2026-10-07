@@ -556,24 +556,29 @@ function showCalculation(span, anchor) {
   card.append(preview, close); anchor.after(card);
   logEvent("span_opened", span.span_id);
 }
-function numberAction(s) {
-  const direct = directCitation(s);
+function numberAction(s, verificationControls = true) {
+  const direct = bundle.task_kind === "reference" ? null : directCitation(s);
+  const prepared = bundle.task_kind === "reference" && Boolean(s.prepared_evidence?.length);
   const b = el(direct ? "a" : "button", s.text);
   if (direct) { b.href = direct.href; b.target = "_blank"; b.rel = "noopener noreferrer"; }
   b.className = "number " + (["uncited", "ambiguous", "unavailable"].includes(s.state) ? "unresolved"
     : s.state === "identifier" ? "identifier" : direct ? "direct" : "");
-  const stateLabel = s.diagnostics ? `candidate evidence ${s.state}; preparation ${s.diagnostics.preparation_status}` : s.state;
+  if (prepared) { b.classList.remove("unresolved"); b.classList.add("prepared"); }
+  const stateLabel = prepared ? "opens independently prepared evidence" : s.diagnostics ? `candidate evidence ${s.state}; preparation ${s.diagnostics.preparation_status}` : s.state;
   b.title = stateLabel + (s.reason ? ": " + s.reason : "");
   b.setAttribute("aria-label", `${s.text}, ${stateLabel}${direct ? ", opens the cited line of the original" : ""}`);
   b.onclick = () => {
-    if (direct) logEvent("original_opened", direct.citation.source_id);
+    if (bundle.task_kind === "reference") showSpan(s, false);
+    else if (direct) logEvent("original_opened", direct.citation.source_id);
     else if (s.calculation) showCalculation(s, b);
     else showSpan(s, false);
   };
-  const fragment = document.createDocumentFragment(); fragment.append(b);
-  const verification = bundle.form.find((f) => f.numeric_span_id === s.span_id);
+  const verification = verificationControls && bundle.form.find((f) => f.numeric_span_id === s.span_id);
+  const fragment = verification ? el("span") : document.createDocumentFragment();
+  if (verification) fragment.className = "quantity-token";
+  fragment.append(b);
   if (verification) {
-    const label = el("label");
+    const label = el("label"); label.className = "quantity-check";
     const check = el("input"); check.type = "checkbox";
     check.dataset.quantityField = verification.field_id;
     check.checked = answers.judgments[verification.field_id]?.value === true;
@@ -586,7 +591,7 @@ function numberAction(s) {
       });
       save(); progress();
     };
-    label.append(check); fragment.append(label);
+    label.append(check); fragment.prepend(label);
   }
   if (direct) {
     const preview = el("button", "Preview evidence"); preview.className = "preview-link";
@@ -606,8 +611,34 @@ function linkedStatement(text, subjectId) {
   wrap.append(document.createTextNode(chars.slice(at).join(""))); return wrap;
 }
 function showSpan(span, follow = true) {
+  if (bundle.task_kind === "reference") {
+    subject = span.claim_ids.length === 1 ? span.claim_ids[0] : null;
+    selection = null;
+  }
   $("evidence-panel").open = true;
   logEvent("span_opened", span.span_id);
+  if (bundle.task_kind === "reference" && span.prepared_evidence?.length) {
+    $("evidence").replaceChildren(el("h3", span.text + ": source evidence"));
+    if (span.context) {
+      const c = span.context;
+      $("evidence").append(el("p", [c.metric, c.entity, c.period, c.unit].filter(Boolean).join(" · ")));
+    }
+    span.prepared_evidence.forEach((p) => {
+      p.citations.forEach((c) => cite(c));
+      if (p.calculation) {
+        $("evidence").append(el("h4", "Prepared calculation"));
+        renderCalculation(p.calculation, $("evidence"), true);
+      }
+    });
+    const provenance = el("details");
+    provenance.append(el("summary", "Navigation provenance"),
+      el("p", "Independently prepared navigation; not human verification. Original reference evidence remains available through Supporting factual evidence."),
+      el("p", span.reason));
+    span.prepared_evidence.forEach((p) => provenance.append(el("p", p.reason)));
+    renderDiagnostics(span, provenance);
+    $("evidence").append(provenance);
+    return;
+  }
   if (span.calculation) {
     const claims = span.claim_ids.filter((id) => bundle.claims.some((c) => c.claim_id === id));
     subject = claims.length === 1 ? claims[0] : null;
@@ -623,7 +654,7 @@ function showSpan(span, follow = true) {
     $("evidence").prepend(el("p", `Preparation context (${c.status}): metric ${c.metric || "unavailable"} · entity ${c.entity || "unavailable"} · period ${c.period || "unavailable"} · unit ${c.unit || "unavailable"}`));
   };
   if (span.prepared_evidence?.length) {
-    $("evidence").replaceChildren(el("h3", `${span.text}: ${span.state}`), el("p", span.reason), el("p", "Prepared for review; not supplied by the answer. Candidate evidence is preserved below."));
+    $("evidence").replaceChildren(el("h3", `${span.text}: ${span.state}`), el("p", span.reason), el("p", bundle.task_kind === "reference" ? "Independently prepared navigation; original reference evidence is preserved separately." : "Prepared for review; not supplied by the answer. Candidate evidence is preserved below."));
     contextLine();
     renderDiagnostics(span, $("evidence"));
     if (span.state === "ambiguous") $("evidence").append(el("p", "Multiple possible sources—no exact match established."));
@@ -632,10 +663,10 @@ function showSpan(span, follow = true) {
       p.citations.forEach((c) => cite(c));
       if (p.calculation) { $("evidence").append(el("h4", "Prepared calculation")); renderCalculation(p.calculation, $("evidence"), true); }
     });
-    $("evidence").append(el("h4", "Candidate-supplied evidence"));
+    $("evidence").append(el("h4", bundle.task_kind === "reference" ? "Original reference evidence" : "Candidate-supplied evidence"));
     span.citations.forEach((c) => cite(c));
     if (span.calculation) { $("evidence").append(el("h4", "Original candidate calculation")); renderCalculation(span.calculation, $("evidence"), true); }
-    if (!span.citations.length && !span.calculation) $("evidence").append(el("p", "No source located in the answer"));
+    if (!span.citations.length && !span.calculation) $("evidence").append(el("p", bundle.task_kind === "reference" ? "Original evidence is recorded at reference level; use Supporting factual evidence." : "No source located in the answer"));
     return;
   }
   const linked = span.claim_ids
@@ -705,6 +736,10 @@ function showSpan(span, follow = true) {
 }
 function renderReport() {
   const report = $("report");
+  if (bundle.task_kind === "reference") {
+    document.querySelector('[aria-label="Report"] > h2').textContent = "Reference text";
+    document.querySelector('[aria-label="Report"] > .legend').textContent = "Original reference text. Inspect evidence and verify quantities in the right pane.";
+  }
   report.replaceChildren();
   $("context").replaceChildren();
   const context = bundle.fields.filter((f) => f.role === "context");
@@ -721,7 +756,7 @@ function renderReport() {
     const chars = Array.from(f.text);
     spans.forEach((s) => {
       p.append(document.createTextNode(chars.slice(offset, s.start).join("")));
-      p.append(numberAction(s));
+      p.append(bundle.task_kind === "reference" ? document.createTextNode(s.text) : numberAction(s));
       offset = s.end;
     });
     p.append(document.createTextNode(chars.slice(offset).join("")));
@@ -780,14 +815,18 @@ function goTo(fieldId, focus = true) {
   current = fieldId;
   const f = bundle.form.find((x) => x.field_id === fieldId);
   const item = f && subjectOf(f);
-  if (item) showSubject(item, f.subject_id, false);
+  if (item && bundle.task_kind !== "reference") showSubject(item, f.subject_id, false);
+  if (bundle.task_kind === "reference") {
+    subject = f?.subject_id || null; selection = null;
+    $("evidence").replaceChildren(el("p", "Click a quantity on the right to inspect its exact source evidence or calculation inputs."));
+  }
   renderForms();
   if (focus) $("field-" + fieldId)?.focus();
 }
 function claimLinks(f) {
   // Select alongside the exact saved claim, while the issue stays in its own pane.
   document.querySelectorAll(".claim-choice").forEach((node) => node.remove());
-  if (!f || !isReference(f.subject_id)) return;
+  if (!f || !isReference(f.subject_id) || bundle.task_kind === "reference") return;
   bundle.claims.forEach((c) => {
     const target = [...$("report").querySelectorAll(".report-text")]
       .find((node) => node.dataset.savedText === c.text && JSON.parse(node.dataset.claimIds).includes(c.claim_id));
@@ -871,7 +910,7 @@ function fieldControl(f, div) {
     progress();
   };
   div.append(note);
-  if (f.subject_id && isReference(f.subject_id))
+  if (f.subject_id && isReference(f.subject_id) && bundle.task_kind !== "reference")
     div.append(el("p", "Select the claims that address this issue in the report pane."));
   const attach = el("button", "Attach selected source passage");
   attach.onclick = () => {
@@ -981,7 +1020,12 @@ function renderForms() {
     if (item) {
       div.append(el("p", isReference(f.subject_id) ? "Reference item:" : "Statement under review:"));
       div.append(linkedStatement(item.text, f.subject_id));
-      div.append(el("small", isReference(f.subject_id) ? "Coverage: decide whether the answer addresses this reference." : "Evidence support: decide whether the source supports the statement as written."));
+      if (bundle.task_kind === "reference") {
+        const facts = el("button", "Supporting factual evidence");
+        facts.onclick = () => showSubject(item, f.subject_id, false);
+        div.append(facts);
+      }
+      div.append(el("small", bundle.task_kind === "reference" ? "Verify the reference against its sources, units, period and arithmetic." : isReference(f.subject_id) ? "Coverage: decide whether the answer addresses this reference." : "Evidence support: decide whether the source supports the statement as written."));
     }
     const quantities = bundle.form.filter((q) => q.numeric_span_id && q.subject_id === f.subject_id);
     if (quantities.length) {
@@ -1128,7 +1172,7 @@ function render() {
     Object.entries(f.option_help || {}).forEach(([option, meaning]) => rubric.append(el("p", `${option}: ${meaning}`)));
   }); guide.append(rubric);
   const inv = evidence.inventory;
-  if (inv) {
+  if (inv && bundle.task_kind !== "reference") {
     const states = Object.entries(inv.spans_by_state)
       .map(([k, v]) => `${v} ${k}`)
       .join(", ");
@@ -1141,7 +1185,8 @@ function render() {
   }
   renderForms();
   const first = bundle.form.find((f) => f.field_id === current);
-  if (first && subjectOf(first)) showSubject(subjectOf(first), first.subject_id, false);
+  if (first && subjectOf(first) && bundle.task_kind !== "reference") showSubject(subjectOf(first), first.subject_id, false);
+  if (bundle.task_kind === "reference") $("evidence").replaceChildren(el("p", "Click a quantity on the right to inspect its exact source evidence or calculation inputs."));
   $("evidence-panel").open = true;
   renderDefects();
   $("subjects").replaceChildren();

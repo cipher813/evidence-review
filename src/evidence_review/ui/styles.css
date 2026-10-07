@@ -255,3 +255,10 @@ header label { margin: .25rem 0; }
 dialog { width: min(900px, 92vw); max-height: 90dvh; overflow: auto; border: 1px solid #879bad; border-radius: 8px; }
 dialog::backdrop { background: #17253466; }
 .info-link { border: 0; background: transparent; padding: .1rem .3rem; text-decoration: underline; }
+
+/* Keep each human check and evidence action inline with the reference prose. */
+.quantity-token { display: inline-flex; align-items: baseline; gap: .2em; white-space: nowrap; }
+.quantity-token .quantity-check { display: inline; margin: 0; }
+.quantity-check input { margin: 0; vertical-align: baseline; }
+.number.prepared { border-bottom: 2px solid #1f5f99; background: #e9f1fa; }
+.number.prepared::after { content: " ↗"; }
