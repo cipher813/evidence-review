@@ -1,3 +1,5 @@
+import hashlib
+import pytest
 from playwright.sync_api import sync_playwright, expect
 from evidence_review import FileStore, open_review
 from evidence_review.contracts import validate_bundle, PreparedEvidence, ReferenceItem
@@ -72,4 +74,92 @@ def test_evidence_list_return_keeps_reference_with_multiple_claim_links(tmp_path
         page.get_by_role('button',name='All evidence links',exact=True).click()
         expect(page.locator('#evidence .number.prepared')).to_have_count(1)
         expect(page.locator('#evidence').get_by_role('button',name='Supporting factual evidence',exact=True)).to_be_visible()
+        browser.close()
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n", "\r", "\u2028"])
+def test_checked_reference_submits_without_reselecting_source_lines(tmp_path, newline):
+    b=reference_quantity_bundle()
+    b.form[0].evidence_required=True
+    for source in b.sources:
+        source.text=newline.join(source.text.splitlines())
+        source.sha256=hashlib.sha256(source.text.encode()).hexdigest()
+    b=validate_bundle(b.model_dump(mode='json'))
+    store=FileStore(tmp_path)
+    with open_review(b,store,launch=False,assessor='Scratch') as h,sync_playwright() as pw:
+        browser=pw.chromium.launch();page=browser.new_page()
+        page.goto(h.url);page.wait_for_selector('#items select')
+        page.locator('#items select').first.select_option('supported')
+        page.locator('#items input[data-quantity-field]').first.check()
+        page.locator('#forms input[type=checkbox]').check()
+        page.locator('#submit').click()
+        expect(page.locator('#status')).not_to_contain_text('Not submitted')
+        expect(page.locator('#status')).to_contain_text('Submitted')
+        state=store.load_task(b.bundle_id)
+        verdict=state['answers']['judgments'][b.form[0].field_id]
+        assert verdict['value']=='supported'
+        assert verdict['selections']
+        source=next(s for s in b.sources if s.source_id==verdict['selections'][0]['source_id'])
+        assert verdict['selections'][0]['source_hash']==source.sha256
+        assert state['answers']['judgments']['quantity']['value'] is True
+        page.reload();page.wait_for_selector('#items select')
+        expect(page.locator('#items input[data-quantity-field]').first).to_be_checked()
+        expect(page.locator('#items')).to_contain_text('Automatic evidence receipt')
+        expect(page.locator('#items').get_by_role('button',name='Remove passage',exact=True)).to_have_count(0)
+        browser.close()
+
+def test_reference_receipts_do_not_invent_checks_or_duplicate_on_save(tmp_path):
+    b=reference_quantity_bundle()
+    b.form[0].evidence_required=True
+    b=validate_bundle(b.model_dump(mode='json'))
+    store=FileStore(tmp_path)
+    with open_review(b,store,launch=False,assessor='Scratch') as h,sync_playwright() as pw:
+        browser=pw.chromium.launch();page=browser.new_page()
+        page.goto(h.url);page.wait_for_selector('#items select')
+        with page.expect_response(lambda r:r.url.endswith('/api/save')):
+            page.locator('#items select').first.select_option('supported')
+        assert store.load_task(b.bundle_id)['answers']['judgments'][b.form[0].field_id]['selections']==[]
+        with page.expect_response(lambda r:r.url.endswith('/api/save')):
+            page.locator('#items input[data-quantity-field]').first.check()
+        before=store.load_task(b.bundle_id)['answers']['judgments'][b.form[0].field_id]['selections']
+        assert before
+        with page.expect_response(lambda r:r.url.endswith('/api/save')):
+            page.locator('#items textarea').fill('Reviewed')
+        assert store.load_task(b.bundle_id)['answers']['judgments'][b.form[0].field_id]['selections']==before
+        with page.expect_response(lambda r:r.url.endswith('/api/save')):
+            page.locator('#items input[data-quantity-field]').first.uncheck()
+        page.locator('#forms input[type=checkbox]').check()
+        page.locator('#submit').click()
+        expect(page.locator('#status')).to_contain_text('unchecked quantity')
+        page.reload();page.wait_for_selector('#items select')
+        assert page.locator('#items').get_by_role('button',name='Remove passage',exact=True).count()>0
+        with page.expect_response(lambda r:r.url.endswith('/api/save')):
+            page.locator('#items input[data-quantity-field]').first.check()
+        expect(page.locator('#items').get_by_role('button',name='Remove passage',exact=True)).to_have_count(0)
+        expect(page.locator('#items')).to_contain_text('Automatic evidence receipt')
+        assert store.load_task(b.bundle_id)['answers']['judgments'][b.form[0].field_id]['selections']==before
+        browser.close()
+
+
+@pytest.mark.parametrize("mode", ["missing_evidence", "candidate"])
+def test_receipts_preserve_missing_evidence_and_candidate_gates(tmp_path, mode):
+    b=reference_quantity_bundle()
+    b.form[0].evidence_required=True
+    if mode=="candidate":
+        b.task_kind="finding"
+    else:
+        span=next(s for s in b.spans if s.prepared_evidence)
+        span.prepared_evidence=[]
+        span.citations=[]
+        span.calculation=None
+    b=validate_bundle(b.model_dump(mode='json'))
+    store=FileStore(tmp_path)
+    with open_review(b,store,launch=False,assessor='Scratch') as h,sync_playwright() as pw:
+        browser=pw.chromium.launch();page=browser.new_page()
+        page.goto(h.url);page.wait_for_selector('#items select')
+        page.locator('#items select').first.select_option('supported')
+        page.locator('#items input[data-quantity-field]').first.check()
+        page.locator('#forms input[type=checkbox]').check()
+        page.locator('#submit').click()
+        expect(page.locator('#status')).to_contain_text('evidence required')
+        assert store.load_task(b.bundle_id)['answers']['judgments'][b.form[0].field_id]['selections']==[]
         browser.close()

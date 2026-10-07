@@ -273,3 +273,5 @@ dialog::backdrop { background: #17253466; }
 body.resizing-panes { user-select: none; }
 .reference-evidence-links { line-height: 2; }
 @media(max-width:1000px) { .layout-divider { display: none; } main { gap: 1rem; } }
+
+[data-receipt-field] [hidden] { display: none; }

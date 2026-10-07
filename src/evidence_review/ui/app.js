@@ -191,7 +191,64 @@ for (const event of ["pointerdown", "keydown", "input"])
     lastInteraction = performance.now();
   });
 setInterval(account, 1000);
+function checkedReferenceEvidence(f) {
+  const j = answers.judgments[f.field_id];
+  if (bundle.task_kind !== "reference" || !j ||
+      !(f.numeric_verification_values || []).includes(j.value)) return [];
+  const quantities = bundle.form.filter((q) => q.numeric_span_id && q.subject_id === f.subject_id);
+  if (!quantities.length || quantities.some((q) => answers.judgments[q.field_id]?.value !== true)) return [];
+  const receipts = new Map();
+  const addCitation = (c) => {
+    const source = bundle.sources.find((s) => s.source_id === c.source_id);
+    if (!source || c.status !== "located" || !Number.isInteger(c.start_line) ||
+        !Number.isInteger(c.end_line) || c.start_line < 1 || c.end_line < c.start_line) return false;
+    const view = evidence.views[`${c.source_id}:${c.start_line}:${c.end_line}`];
+    if (!view || typeof view.text !== "string") return false;
+    const receipt = {source_id: source.source_id, source_hash: source.sha256,
+      start_line: c.start_line, end_line: c.end_line,
+      excerpt: view.text, subject_id: f.subject_id};
+    receipts.set(JSON.stringify([receipt.source_id, receipt.start_line, receipt.end_line]), receipt);
+    return true;
+  };
+  const addCalculation = (calculation) => {
+    let located = false;
+    for (const operand of calculation?.operands || []) {
+      if (operand.citation) located = addCitation(operand.citation) || located;
+      if (operand.calculation) located = addCalculation(operand.calculation) || located;
+    }
+    return located;
+  };
+  for (const q of quantities) {
+    const span = bundle.spans.find((s) => s.span_id === q.numeric_span_id);
+    const evidenceRows = span?.prepared_evidence?.length ? span.prepared_evidence : [span];
+    let located = false;
+    for (const row of evidenceRows) {
+      for (const c of row?.citations || []) located = addCitation(c) || located;
+      located = addCalculation(row?.calculation) || located;
+    }
+    // Evidence receipts are bookkeeping for explicit checks, never new verdicts.
+    if (!located) return [];
+  }
+  return [...receipts.values()];
+}
+function attachCheckedReferenceEvidence() {
+  for (const f of bundle.form) {
+    const receipts = checkedReferenceEvidence(f);
+    if (!receipts.length) continue;
+    const j = judgment(f.field_id);
+    let added = 0;
+    for (const receipt of receipts) {
+      if (!j.selections.some((s) => s.source_id === receipt.source_id &&
+          s.start_line === receipt.start_line && s.end_line === receipt.end_line &&
+          s.source_hash === receipt.source_hash)) {
+        j.selections.push(receipt); added++;
+      }
+    }
+    if (added) logEvent("checked_quantity_evidence_attached", f.field_id);
+  }
+}
 function save(submit = false) {
+  attachCheckedReferenceEvidence();
   const snapshot = structuredClone(answers);
   const elapsed = active;
   active = 0;
@@ -806,7 +863,7 @@ function answered(f) {
       bundle.form.some((q) => q.numeric_span_id && q.subject_id === f.subject_id &&
         answers.judgments[q.field_id]?.value !== true)) return false;
   if (f.note_required_unless.length && !f.note_required_unless.includes(j.value) && !j.note.trim()) return false;
-  if (f.evidence_required && !j.selections.length) return false;
+  if (f.evidence_required && !j.selections.length && !checkedReferenceEvidence(f).length) return false;
   return f.kind === "text" ? String(j.value).trim() !== "" : j.value !== "";
 }
 function itemFields() {
@@ -932,6 +989,8 @@ function fieldControl(f, div) {
   div.append(note);
   if (f.subject_id && isReference(f.subject_id) && bundle.task_kind !== "reference")
     div.append(el("p", "Select the claims that address this issue in the report pane."));
+  if (bundle.task_kind === "reference" && f.numeric_verification_values?.length)
+    div.append(el("p", "When every quantity is checked and this reference is verified, its exact source passages are attached automatically on save. Additional passage attachments are optional."));
   const attach = el("button", "Attach selected source passage");
   attach.onclick = () => {
     if (!selection) {
@@ -947,11 +1006,22 @@ function fieldControl(f, div) {
     const line = el("p", `${s.source_id} L${s.start_line}–L${s.end_line}: ${s.excerpt}`);
     const remove = el("button", "Remove passage");
     remove.onclick = () => {
+      if (checkedReferenceEvidence(f).some((receipt) => receipt.source_id === s.source_id &&
+          receipt.source_hash === s.source_hash && receipt.start_line === s.start_line &&
+          receipt.end_line === s.end_line)) {
+        progress();
+        $("status").textContent = "This evidence receipt is required by your current quantity checks.";
+        return;
+      }
       judgment(f.field_id).selections.splice(i, 1);
       renderForms();
       save();
     };
-    line.append(remove);
+    const controls = el("span");
+    controls.dataset.receiptField = f.field_id;
+    controls.dataset.receiptKey = JSON.stringify([s.source_id, s.source_hash, s.start_line, s.end_line]);
+    controls.append(remove, el("small", " · Automatic evidence receipt for checked quantities"));
+    line.append(controls);
     div.append(line);
   }
 }
@@ -963,6 +1033,15 @@ function quantityProgress() {
   });
 }
 function progress() {
+  document.querySelectorAll("[data-receipt-field]").forEach((controls) => {
+    const field = bundle.form.find((f) => f.field_id === controls.dataset.receiptField);
+    const automatic = field && checkedReferenceEvidence(field).some((s) =>
+      JSON.stringify([s.source_id, s.source_hash, s.start_line, s.end_line]) === controls.dataset.receiptKey);
+    controls.querySelector("button").hidden = Boolean(automatic);
+    controls.querySelector("button").disabled = Boolean(automatic);
+    controls.querySelector("small").hidden = !automatic;
+  });
+
   quantityProgress();
   const required = bundle.form.filter((f) => f.required);
   const done = required.filter(answered).length;
@@ -982,7 +1061,7 @@ function progress() {
   const j = field && answers.judgments[field.field_id];
   const missing = [];
   if (j && (field.required || j.value !== "") && field.note_required_unless.length && !field.note_required_unless.includes(j.value) && !j.note.trim()) missing.push("explanation");
-  if (j && (field.required || j.value !== "") && field.evidence_required && !j.selections.length) missing.push("source passage");
+  if (j && (field.required || j.value !== "") && field.evidence_required && !j.selections.length && !checkedReferenceEvidence(field).length) missing.push("source passage");
   if (missing.length) $("progress").textContent += " · Pending: " + missing.join(" and ");
   const button = $("next-item");
   if (button) button.textContent = next ? "Next unanswered item" : "Go to finish";
