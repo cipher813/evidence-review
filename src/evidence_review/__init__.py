@@ -18,6 +18,7 @@ __all__ = [
     "ReviewBundle",
     "ReviewSubmission",
     "blind_violations",
+    "capabilities",
     "export_json",
     "export_submission",
     "inventory",
@@ -31,6 +32,13 @@ def open_review(bundle, store, hooks=None, **kwargs):
     from .server import open_review as implementation
 
     return implementation(bundle, store, hooks, **kwargs)
+
+
+def capabilities():
+    """Contracts and presentation modes this package version implements."""
+    from .server import capabilities as implementation
+
+    return implementation()
 
 
 def export_submission(store, task_id, revision):

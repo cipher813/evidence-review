@@ -123,9 +123,10 @@ def validate_answers(bundle, answers, complete=False):
         for field in bundle.form:
             verdict = judgments.get(field.field_id)
             if verdict and verdict.value in field.numeric_verification_values:
-                quantities = [q for q in bundle.form if q.numeric_span_id and q.subject_id == field.subject_id]
-                if any(q.field_id not in judgments or judgments[q.field_id].value is not True for q in quantities):
-                    raise ValueError(f"unchecked quantity: {field.field_id}")
+                # Quantity and fact-atom checks gate a verified verdict alike.
+                checks = [q for q in bundle.form if (q.numeric_span_id or q.atom) and q.subject_id == field.subject_id]
+                if any(q.field_id not in judgments or judgments[q.field_id].value is not True for q in checks):
+                    raise ValueError(f"unchecked quantity or atom: {field.field_id}")
     if len({d.defect_id for d in defects}) != len(defects):
         raise ValueError("duplicate defect identity")
     for d in defects:
