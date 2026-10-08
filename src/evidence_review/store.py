@@ -13,7 +13,8 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Protocol
-from .contracts import PACKAGE_VERSION, Judgment, Defect, ReviewSubmission, digest, now
+from .contracts import (MATERIAL_DISPOSITIONS, PACKAGE_VERSION, AnswerAnnotation, Judgment, Defect,
+                        ReviewSubmission, digest, now, validate_answer_range)
 from .evidence import passage
 
 
@@ -62,8 +63,9 @@ def atomic(path, data):
 
 
 def validate_answers(bundle, answers, complete=False):
-    if set(answers) - {"judgments", "defects"}:
+    if set(answers) - {"judgments", "defects", "annotations"}:
         raise ValueError("unknown answer section")
+    annotations = [AnswerAnnotation.model_validate(a) for a in answers.get("annotations", [])]
     judgments = {
         k: Judgment.model_validate(v) for k, v in answers.get("judgments", {}).items()
     }
@@ -136,7 +138,20 @@ def validate_answers(bundle, answers, complete=False):
             not d.category.strip() or not d.evidence_note.strip() or d.material is None
         ):
             raise ValueError("defect category, materiality and explanation required")
-    for record in [*judgments.values(), *defects]:
+    if len({a.annotation_id for a in annotations}) != len(annotations):
+        raise ValueError("duplicate annotation identity")
+    for a in annotations:
+        validate_answer_range(bundle, a.answer_range)
+        if complete and a.disposition is None:
+            raise ValueError(f"annotation disposition required: {a.annotation_id}")
+        if complete and a.disposition != "supported" and not a.reason.strip():
+            raise ValueError(f"annotation reason required: {a.annotation_id}")
+        if complete and a.disposition in MATERIAL_DISPOSITIONS and a.material is None:
+            raise ValueError(f"annotation materiality required: {a.annotation_id}")
+    for d in defects:
+        for r in d.answer_ranges:
+            validate_answer_range(bundle, r)
+    for record in [*judgments.values(), *defects, *annotations]:
         for selection in record.selections:
             source = sources.get(selection.source_id)
             if source is None or source.sha256 != selection.source_hash:
@@ -144,10 +159,22 @@ def validate_answers(bundle, answers, complete=False):
             text = passage(source, selection.start_line, selection.end_line)["text"]
             if text != selection.excerpt:
                 raise ValueError("source selection excerpt invalid")
-    return {
+    cleaned = {
         "judgments": {k: v.model_dump(mode="json") for k, v in judgments.items()},
         "defects": [d.model_dump(mode="json") for d in defects],
     }
+    # Omitted when empty, so answers saved before annotations keep their signatures.
+    if annotations:
+        cleaned["annotations"] = [a.model_dump(mode="json") for a in annotations]
+    return cleaned
+
+
+def submitted_answers(submission):
+    """The answer sections of a stored submission, in the shape the store saves."""
+    out = {"judgments": submission.get("judgments"), "defects": submission.get("defects")}
+    if submission.get("annotations"):
+        out["annotations"] = submission["annotations"]
+    return out
 
 
 def submission_matches_snapshot(state):
@@ -156,7 +183,7 @@ def submission_matches_snapshot(state):
     return bool(prior and prior.get("complete") is True
                 and prior.get("bundle_hash") == state.get("bundle_hash")
                 and prior.get("assessor") == state.get("assessor")
-                and {"judgments": prior.get("judgments"), "defects": prior.get("defects")} == state.get("answers"))
+                and submitted_answers(prior) == state.get("answers"))
 
 
 class FileStore:

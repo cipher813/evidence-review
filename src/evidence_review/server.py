@@ -13,7 +13,8 @@ from urllib.parse import urlsplit, parse_qsl
 import re
 from .atomic_evidence import (ATOM_EVIDENCE_SCHEMA, RENDER_MANIFEST_SCHEMA, atom_view, build_atom_manifest,
                               validate_atom_evidence)
-from .contracts import ReviewWorkload, PACKAGE_VERSION, blind_terms, blind_violations, validate_bundle
+from .contracts import (ANSWER_ANNOTATION_CONTRACT, OFFSET_UNIT, ReviewWorkload, PACKAGE_VERSION, blind_terms,
+                        blind_violations, digest, documents_digest, validate_bundle)
 from .source_rendering import (DERIVATIVE_SCHEMA, RenderedSourceAsset, render_frozen_text,
                                validate_render_asset)
 from .evidence import evidence_views, inventory, navigation_coverage
@@ -36,7 +37,14 @@ EVENT_KINDS = {
 ATOMIC_SOURCE_CHECK = "atomic-source-check/v1"
 PRESENTATION_MODES = ("default", ATOMIC_SOURCE_CHECK)
 CONTRACTS = ("review-bundle/v1", "review-submission/v1", ATOM_EVIDENCE_SCHEMA, RENDER_MANIFEST_SCHEMA,
-             DERIVATIVE_SCHEMA)
+             DERIVATIVE_SCHEMA, ANSWER_ANNOTATION_CONTRACT)
+
+
+def answer_annotation_binding(bundle):
+    """What the browser stamps on a selected answer range; the store re-validates every value."""
+    return {"contract": ANSWER_ANNOTATION_CONTRACT, "offset_unit": OFFSET_UNIT,
+            "documents_sha256": documents_digest(bundle.document_hashes),
+            "fields": {f.path: digest(f.text) for f in bundle.fields if f.role == "answer"}}
 MAX_RENDER_RESPONSE = 8_000_000
 SAFE_SOURCE = re.compile(r"^[A-Za-z0-9_.:-]{1,160}$")
 SAFE_TARGET = re.compile(r"^tgt:[0-9a-f]{24}$")
@@ -309,6 +317,7 @@ def open_review(
                                 "mode": presentation_mode,
                             },
                             "capabilities": capabilities(),
+                            "answer_annotation": answer_annotation_binding(current[0]),
                             "atoms": atom_view(current[0], sidecars[0]["atoms"],
                                                [a.manifest for a in sidecars[0]["renders"].values()])
                             if sidecars[0]["atoms"] is not None else None,

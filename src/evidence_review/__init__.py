@@ -1,5 +1,9 @@
 from .contracts import (
     PACKAGE_VERSION,
+    AnswerAnnotation,
+    AnswerRange,
+    answer_range,
+    validate_answer_range,
     ReviewBundle,
     ReviewSubmission,
     blind_violations,
@@ -12,6 +16,10 @@ from .store import Conflict, FileStore
 
 __version__ = PACKAGE_VERSION
 __all__ = [
+    "AnswerAnnotation",
+    "AnswerRange",
+    "answer_range",
+    "validate_answer_range",
     "Conflict",
     "FileStore",
     "Hooks",

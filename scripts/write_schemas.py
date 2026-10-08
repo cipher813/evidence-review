@@ -3,13 +3,14 @@ import json
 from pathlib import Path
 
 from evidence_review.atomic_evidence import AtomEvidenceManifest, SourceRenderManifest
-from evidence_review.contracts import ReviewBundle, ReviewSubmission
+from evidence_review.contracts import AnswerAnnotation, ReviewBundle, ReviewSubmission
 
 SCHEMAS = {
     "review-bundle-v1.json": ReviewBundle,
     "review-submission-v1.json": ReviewSubmission,
     "atom-evidence-v1.json": AtomEvidenceManifest,
     "source-render-manifest-v1.json": SourceRenderManifest,
+    "answer-annotation-v1.json": AnswerAnnotation,
 }
 
 

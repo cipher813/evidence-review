@@ -7,7 +7,7 @@ import re
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Literal
-from pydantic import BaseModel, ConfigDict, Field, model_validator, model_serializer
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator, model_serializer
 
 
 PACKAGE_VERSION = "0.5.8"
@@ -502,6 +502,60 @@ class Selection(Strict):
     subject_id: str | None = None
 
 
+ANSWER_ANNOTATION_CONTRACT = "answer-annotation/v1"
+# Offsets index the exact answer text as a sequence of Unicode code points (Python
+# ``str`` indexing; ``Array.from(text)`` in the browser), never UTF-16 units or
+# bytes. A combining mark is its own code point; an astral character is one.
+OFFSET_UNIT = "code_point"
+DISPOSITIONS = ("supported", "defective", "cannot_verify", "incomplete")
+# Materiality applies only where the reviewer reports a problem.
+MATERIAL_DISPOSITIONS = ("defective", "incomplete")
+
+
+def documents_digest(document_hashes) -> str:
+    """One digest binding an answer range to the bundle's declared report/document hashes."""
+    return digest(document_hashes)
+
+
+class AnswerRange(Strict):
+    """Exact reviewer-selected text in one original answer field (answer-annotation/v1).
+
+    ``start``/``end`` are half-open code-point offsets into the field's exact text;
+    the field and document digests make a range recorded against other text stale."""
+    contract: Literal["answer-annotation/v1"] = ANSWER_ANNOTATION_CONTRACT
+    field_path: str = Field(min_length=1)
+    start: StrictInt = Field(ge=0)
+    end: StrictInt = Field(gt=0)
+    text: str = Field(min_length=1)
+    offset_unit: Literal["code_point"] = OFFSET_UNIT
+    field_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    documents_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class AnswerAnnotation(Strict):
+    """A reviewer's finding about one selected answer passage (answer-annotation/v1).
+
+    Annotations record only what the reviewer chose to annotate; they never claim
+    the answer was reviewed exhaustively, and an unannotated passage is not
+    thereby supported. An omission has no answer range and is recorded as a
+    ``Defect`` without ``answer_ranges``. ``annotation_id`` is the stable handle
+    other records (e.g. a reviewer worksheet) use to link to this annotation."""
+    contract: Literal["answer-annotation/v1"] = ANSWER_ANNOTATION_CONTRACT
+    annotation_id: str = Field(pattern=r"^ann:[A-Za-z0-9_-]{1,64}$")
+    answer_range: AnswerRange
+    # None is an undecided draft; submission requires an explicit disposition.
+    disposition: Literal["supported", "defective", "cannot_verify", "incomplete"] | None = None
+    reason: str = ""
+    material: bool | None = None
+    selections: list[Selection] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def materiality_where_applicable(self):
+        if self.material is not None and self.disposition not in MATERIAL_DISPOSITIONS:
+            raise ValueError("materiality applies only to defective or incomplete annotations")
+        return self
+
+
 class Judgment(Strict):
     value: str | bool
     note: str = ""
@@ -517,6 +571,17 @@ class Defect(Strict):
     reference_ids: list[str] = Field(default_factory=list)
     evidence_note: str = ""
     selections: list[Selection] = Field(default_factory=list)
+    # Exact answer passages the defect concerns (answer-annotation/v1). Empty means
+    # an omission or whole-answer defect, recorded without any answer range.
+    answer_ranges: list[AnswerRange] = Field(default_factory=list)
+
+    @model_serializer(mode="wrap")
+    def preserve_legacy_fields(self, handler):
+        data = handler(self)
+        # Optional extension must not alter the bytes of already exported submissions.
+        if not self.answer_ranges:
+            data.pop("answer_ranges", None)
+        return data
 
 
 class ReviewSubmission(Strict):
@@ -534,6 +599,44 @@ class ReviewSubmission(Strict):
     complete: Literal[True]
     amendment_reason: str = ""
     provenance: dict[str, str]
+    # Reviewer-selected answer annotations (answer-annotation/v1).
+    annotations: list[AnswerAnnotation] = Field(default_factory=list)
+
+    @model_serializer(mode="wrap")
+    def preserve_legacy_fields(self, handler):
+        data = handler(self)
+        # Absent annotations keep the exact canonical bytes of earlier submissions.
+        if not self.annotations:
+            data.pop("annotations", None)
+        return data
+
+
+def answer_range(bundle, field_path, start, end) -> AnswerRange:
+    """Build the exact range for code-point offsets ``[start, end)`` of an answer field."""
+    field = next((f for f in bundle.fields if f.path == field_path and f.role == "answer"), None)
+    if field is None:
+        raise ValueError("answer range names no answer field")
+    if not (type(start) is int and type(end) is int and 0 <= start < end <= len(field.text)):
+        raise ValueError("answer range out of bounds")
+    return validate_answer_range(bundle, AnswerRange(
+        field_path=field_path, start=start, end=end, text=field.text[start:end],
+        field_sha256=digest(field.text), documents_sha256=documents_digest(bundle.document_hashes)))
+
+
+def validate_answer_range(bundle, selected) -> AnswerRange:
+    """Refuse a range that is unknown, stale, out of bounds or not the exact text."""
+    selected = AnswerRange.model_validate(selected.model_dump() if hasattr(selected, "model_dump") else selected)
+    field = next((f for f in bundle.fields if f.path == selected.field_path), None)
+    if field is None or field.role != "answer":
+        raise ValueError("answer range names no answer field")
+    if (selected.field_sha256 != digest(field.text)
+            or selected.documents_sha256 != documents_digest(bundle.document_hashes)):
+        raise ValueError("answer range stale: answer text or documents changed")
+    if not 0 <= selected.start < selected.end <= len(field.text):
+        raise ValueError("answer range out of bounds")
+    if field.text[selected.start:selected.end] != selected.text:
+        raise ValueError("answer range text mismatch")
+    return selected
 
 
 def validate_bundle(data) -> ReviewBundle:
