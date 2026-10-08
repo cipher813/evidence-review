@@ -233,15 +233,32 @@ def bundle_citations(bundle):
     return out
 
 
+AMBIGUOUS_WITHOUT_CANDIDATES = ("Ambiguous: several candidate sources and fewer than two located on this number, "
+                                "so no candidate can be shown and none is chosen")
+
+
 def _span_targets(bundle, span):
     if span.calculation:
         return [], "derived", f"span:{span.span_id}"
     cites = [c for c in span.citations if c.status == "located"]
     if span.state == "ambiguous" or len(cites) > 1:
-        return [citation_target_id(bundle, c) for c in cites], "ambiguous", None
+        targets = [citation_target_id(bundle, c) for c in cites]
+        # A producer may mark a number ambiguous without attaching two located candidates (the bundle
+        # contract allows it). That one occurrence is unavailable, never located on its one candidate,
+        # and it never refuses the rest of the bundle.
+        if len(set(targets)) < 2:
+            return [], "unavailable", None
+        return targets, "ambiguous", None
     if len(cites) == 1:
         return [citation_target_id(bundle, cites[0])], "located", None
     return [], "unavailable", None
+
+
+def _span_reason(span, state):
+    if span.state == "ambiguous" and state == "unavailable":
+        return AMBIGUOUS_WITHOUT_CANDIDATES + (": " + span.reason if span.reason else "")
+    return span.reason or ({"ambiguous": "Several candidate sources; no unique match",
+                            "unavailable": "No source located for this number"}.get(state, ""))
 
 
 def prepared_ref(span, index):
@@ -306,8 +323,7 @@ def build_atom_manifest(bundle, facts=(), *, method="evidence-review/numeric-inv
             bundle_hash=bundle.bundle_hash, field_path=span.field_path, start=span.start, end=span.end,
             text=span.text, kind="quantity", claim_ids=list(span.claim_ids), numeric_span_id=span.span_id,
             form_field_id=checks.get(span.span_id), evidence_state=state,
-            reason=span.reason or ({"ambiguous": "Several candidate sources; no unique match",
-                                    "unavailable": "No source located for this number"}.get(state, "")),
+            reason=_span_reason(span, state),
             citation_target_ids=targets if state == "located" else [],
             candidate_target_ids=targets if state == "ambiguous" else [], calculation_ref=calc,
             prepared_refs=[prepared_ref(span, i) for i in range(len(span.prepared_evidence))],
@@ -558,6 +574,8 @@ def validate_atom_evidence(bundle, payload, render_manifests=()):
             if (span is None or span.state == "identifier" or (span.field_path, span.start, span.end)
                     != (item.field_path, item.start, item.end)):
                 raise ValueError("quantity atom does not match its numeric span")
+            if span.state == "ambiguous" and item.evidence_state == "located":
+                raise ValueError("an ambiguous number is never shown as located")
             if item.numeric_span_id in quantity_spans:
                 raise ValueError("number atomized twice")
             quantity_spans.add(item.numeric_span_id)
