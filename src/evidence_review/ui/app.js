@@ -500,13 +500,35 @@ function showSubject(item, id, follow = true) {
     $("evidence").append(
       el("p", "No cited evidence; search the frozen sources."),
     );
+  authorDeclarations(id ? [id] : [], $("evidence"));
+}
+// The author's declared support status: shown beside the evidence, never as support or as a citation.
+const AUTHOR_DECLARATION_NOTE = "Declared by the author of the answer; not evidence, not a citation and not a support judgment. It never checks a row or changes any status.";
+function authorDeclarations(claimIds, box) {
+  const seen = new Set();
+  claimIds.forEach((id) => {
+    const claim = bundle.claims.find((c) => c.claim_id === id);
+    if (!claim || !claim.support_declaration || seen.has(id)) return;
+    seen.add(id);
+    renderAuthorDeclaration({ claim_id: id, label: "Author's declaration", declaration: claim.support_declaration,
+                              provenance: AUTHOR_DECLARATION_NOTE }, box);
+  });
+}
+function renderAuthorDeclaration(d, box) {
+  const note = el("aside"); note.className = "author-declaration"; note.dataset.declarationClaim = d.claim_id;
+  note.setAttribute("aria-label", `${d.label} for statement ${d.claim_id}`);
+  note.append(el("p", `${d.label}: ${d.declaration}`), el("small", d.provenance));
+  box.append(note);
+}
+function operandContext(o) {
+  return [o.entity, o.metric].filter(Boolean).join(" · ");
 }
 function linkedInput(o) {
   const c = o.citation;
   const href = c?.status === "located" && (evidence.links || {})[c.source_id]?.line_url
     ? originalHref(c.source_id, c.excerpt, c.start_line, c.end_line) : null;
   const value = el(href ? "a" : "span", o.value);
-  value.title = o.entity || o.name;
+  value.title = operandContext(o) || o.name;
   if (href) {
     value.href = href; value.target = "_blank"; value.rel = "noopener noreferrer";
     value.onclick = () => logEvent("original_opened", c.source_id);
@@ -524,7 +546,7 @@ function compactInput(o, box, inherited = {}) {
   const subtotalLabel = sections.length && sections.every((v) => v === sections[0]) ? sections[0].replace(/[:*]+/g, "").trim() : null;
   const label = labels.length >= 4 ? labels[labels.length - 2] : subtotalLabel || o.name.replace(/_/g, " ");
   row.append(document.createTextNode(`${label}: `), linkedInput(o),
-    document.createTextNode(`${o.unit && o.unit !== inherited.unit ? " " + o.unit : ""}${o.period && o.period !== inherited.period ? " · " + o.period : ""}`));
+    document.createTextNode(`${o.unit && o.unit !== inherited.unit ? " " + o.unit : ""}${o.metric && o.metric !== inherited.metric ? " · " + o.metric : ""}${o.period && o.period !== inherited.period ? " · " + o.period : ""}`));
   if (o.calculation) {
     row.append(document.createTextNode(" = "));
     // A subtotal expression uses its own operand names; values link to exact leaves below.
@@ -555,6 +577,7 @@ function calculationTechnical(c, box) {
   const r = c.recomputation || { status: "unresolved" };
   box.append(el("p", `Formula: ${c.formula}`),
     el("p", `Reported result: ${c.result} ${c.unit}`), el("p", `Absolute tolerance: ${c.tolerance} ${c.unit}`));
+  if (c.declared_tolerance) box.append(el("p", `Author's declared tolerance (display only; not used in recomputation): ${c.declared_tolerance}`));
   const constants = [...new Set(c.formula.replace(/[A-Za-z_]\w*/g, "").match(/\d+(?:\.\d+)?/g) || [])];
   constants.forEach((v) => box.append(el("p", "Formula literal (source association not established): " + v)));
   c.operands.filter((o) => o.kind === "constant").forEach((o) => box.append(el("p", "Mathematical constant: " + o.value)));
@@ -570,6 +593,10 @@ function calculationTechnical(c, box) {
 }
 function renderCalculation(c, box, preview = false, inputs = c.operands, checks = true) {
   box.append(el("p", `${readableFormula(c)} → reported ${c.result} ${c.unit}`));
+  // The numeric tolerance recomputation uses, in the result's unit; the author's prose stays beside it.
+  const tolerance = el("p", `Tolerance ±${c.tolerance}${c.unit ? " " + c.unit : ""}`); tolerance.className = "calc-tolerance";
+  if (c.declared_tolerance) tolerance.append(document.createTextNode(` · author's declared tolerance: ${c.declared_tolerance} (display only)`));
+  box.append(tolerance);
   inputs.forEach((o) => compactInput(o, box));
   if (checks) {
     const details = el("details"); details.append(el("summary", "Calculation checks"));
@@ -644,6 +671,7 @@ function showCalculation(span, anchor) {
   const card = el("aside"); card.className = "calculation-card";
   card.setAttribute("role", "region"); card.setAttribute("aria-label", "Calculation details");
   renderNumberCalculation(span, card);
+  authorDeclarations(span.claim_ids, card);
   const preview = el("button", "Preview calculation evidence");
   preview.onclick = () => showSpan(span, false);
   const close = el("button", "Close calculation details"); close.onclick = () => { card.remove(); anchor.focus(); };
@@ -745,6 +773,7 @@ function showSpan(span, follow = true) {
     if (subject && follow) followSubject(subject);
     $("evidence").replaceChildren(el("h3", span.text));
     renderNumberCalculation(span, $("evidence"), true);
+    authorDeclarations(span.claim_ids, $("evidence"));
     return;
   }
   const contextLine = () => {
@@ -766,6 +795,7 @@ function showSpan(span, follow = true) {
     span.citations.forEach((c) => cite(c));
     if (span.calculation) { $("evidence").append(el("h4", "Original candidate calculation")); renderCalculation(span.calculation, $("evidence"), true); }
     if (!span.citations.length && !span.calculation) $("evidence").append(el("p", bundle.task_kind === "reference" ? "Original evidence is recorded at reference level; use Supporting factual evidence." : "No source located in the answer"));
+    authorDeclarations(span.claim_ids, $("evidence"));
     return;
   }
   const linked = span.claim_ids
@@ -1617,7 +1647,7 @@ function renderPreparedInputs(inputs, r, more) {
   box.append(el("h4", "Independently located inputs"), el("p", inputs[0].provenance));
   inputs.forEach((o) => {
     const item = el("div"); item.className = "atom-prepared-input"; item.dataset.preparedInputRef = o.ref;
-    const what = [o.value + (o.unit ? " " + o.unit : ""), o.period, o.entity].filter(Boolean).join(" · ");
+    const what = [o.value + (o.unit ? " " + o.unit : ""), o.metric, o.period, o.entity].filter(Boolean).join(" · ");
     item.append(el("h5", `${o.label}: ${what}`));
     if (o.original) {
       item.append(el("small", `Original candidate input: ${o.original.status}${o.original.reason ? ": " + o.original.reason : ""}`));
@@ -1704,6 +1734,7 @@ function renderAtomRows() {
     summary.setAttribute("aria-label", `${summaryText} for “${r.text}” (atom ${i + 1})`);
     more.append(summary);
     more.ontoggle = () => { if (more.open) logEvent("atom_row_expanded", r.atom_id); };
+    (r.author_declarations || []).forEach((d) => renderAuthorDeclaration(d, more));
     if (r.calculation && preparations.length) more.append(el("h4", "Original candidate calculation"));
     if (r.calculation) {
       renderCalculation(r.calculation, more, true, r.calculation.operands, true);

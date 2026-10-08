@@ -324,3 +324,6 @@ mark.cited-words { background: #fff0bc; text-decoration: underline; text-decorat
 .pdf-glyphs { position: absolute; white-space: pre; line-height: 1; font-family: Helvetica, Arial, sans-serif; }
 .pdf-page .render-notice { position: absolute; top: 1rem; left: 1rem; right: 1rem; }
 @media (max-width: 1000px) { body.atomic-mode main { grid-template-areas: "report" "judgments" "evidence"; } }
+/* The author's own declaration: set apart and labelled in text, never styled like evidence or support. */
+.author-declaration { border-left: 3px dashed #6b6b6b; padding-left: .5rem; margin: .4rem 0; font-style: italic; }
+.author-declaration small { display: block; font-style: normal; }

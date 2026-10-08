@@ -10,7 +10,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator, model_serializer
 
 
-PACKAGE_VERSION = "0.5.4"
+PACKAGE_VERSION = "0.5.5"
 
 
 def canonical_json(value) -> bytes:
@@ -76,6 +76,8 @@ class Operand(Strict):
     kind: Literal["source", "constant", "derived"] = "source"
     entity: str = ""
     calculation: Calculation | None = None
+    # What the value measures (e.g. "operating margin"). Display context only.
+    metric: str = ""
 
     @model_validator(mode="after")
     def provenance_kind(self):
@@ -87,6 +89,15 @@ class Operand(Strict):
             raise ValueError("source input cannot carry an intermediate calculation")
         return self
 
+    @model_serializer(mode="wrap")
+    def preserve_legacy_fields(self, handler):
+        data = handler(self)
+        # Optional context extension must not alter hashes of already sealed bundles;
+        # a supplied metric is serialized and hashed like every other field.
+        if not self.metric:
+            data.pop("metric", None)
+        return data
+
 
 class Calculation(Strict):
     formula: str
@@ -96,6 +107,16 @@ class Calculation(Strict):
     tolerance: str = "0"
     conversions: list[str] = Field(default_factory=list)
     recomputation: dict = Field(default_factory=dict)
+    # The author's prose tolerance (e.g. "0.1 percentage point"). Display only:
+    # never parsed, never used in recomputation; ``tolerance`` alone is numeric.
+    declared_tolerance: str = ""
+
+    @model_serializer(mode="wrap")
+    def preserve_legacy_fields(self, handler):
+        data = handler(self)
+        if not self.declared_tolerance:
+            data.pop("declared_tolerance", None)
+        return data
 
     @model_validator(mode="after")
     def recompute(self):
@@ -124,6 +145,17 @@ class Claim(Strict):
     text: str
     citations: list[Citation] = Field(default_factory=list)
     calculation: Calculation | None = None
+    # The author's own declared support status and reason (e.g. "inference: derived
+    # from the margin trend"). Display only: never a citation, never support, and it
+    # never checks a row or changes any verification status.
+    support_declaration: str = ""
+
+    @model_serializer(mode="wrap")
+    def preserve_legacy_fields(self, handler):
+        data = handler(self)
+        if not self.support_declaration:
+            data.pop("support_declaration", None)
+        return data
 
 
 class ReportField(Strict):
