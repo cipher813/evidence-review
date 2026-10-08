@@ -1610,14 +1610,23 @@ function selectedAnswerRange() {
   const host = answerHost(range.startContainer), end = answerHost(range.endContainer);
   if (!host && !end) return undefined; // a selection elsewhere leaves the last answer selection intact
   if (!host || host !== end) return { error: "Select text within one answer field." };
-  const field = bundle.fields.find((f) => f.path === host.dataset.fieldPath && f.role !== "context");
-  const binding = evidence.answer_annotation;
-  if (!field || !binding?.fields?.[field.path]) return { error: "That text is not part of an answer under review." };
+  const field = annotatableFields().find((f) => f.path === host.dataset.fieldPath);
+  if (!field) return { error: "That text is not part of an answer under review." };
   const start = answerOffset(host, range.startContainer, range.startOffset);
   const stop = answerOffset(host, range.endContainer, range.endOffset);
-  const chars = Array.from(field.text);
-  if (start === null || stop === null || !(start >= 0 && start < stop && stop <= chars.length))
+  if (start === null || stop === null || !(start >= 0 && start < stop && stop <= codePoints(field.text)))
     return { error: "That selection has no exact answer text." };
+  return rangeFor(field, start, stop);
+}
+// Answer fields the server bound for annotation (never context fields).
+function annotatableFields() {
+  const binding = evidence.answer_annotation;
+  return bundle.fields.filter((f) => f.role !== "context" && binding?.fields?.[f.path]);
+}
+// The one range shape both the mouse and the keyboard path produce: code points [start, stop).
+function rangeFor(field, start, stop) {
+  const binding = evidence.answer_annotation;
+  const chars = Array.from(field.text);
   return {
     contract: binding.contract,
     field_path: field.path,
@@ -1633,6 +1642,54 @@ function describeRange(r) {
   const field = bundle.fields.find((f) => f.path === r.field_path);
   return `${field ? field.label : r.field_path}, characters ${r.start + 1}–${r.end}`;
 }
+// Keyboard path: every exact occurrence of typed text in one answer field, as code points.
+// indexOf counts UTF-16 units; a well-formed needle only matches at a code-point boundary.
+function typedOccurrences(field, needle) {
+  const out = [];
+  if (!needle) return out;
+  for (let i = field.text.indexOf(needle); i !== -1; i = field.text.indexOf(needle, i + 1)) {
+    const start = codePoints(field.text.slice(0, i));
+    out.push([start, start + codePoints(needle)]);
+  }
+  return out;
+}
+function renderTypedOccurrences() {
+  const field = annotatableFields().find((f) => f.path === $("annotate-field").value);
+  const needle = $("annotate-text").value;
+  const pick = $("annotate-occurrence");
+  const found = field ? typedOccurrences(field, needle) : [];
+  pick.replaceChildren();
+  if (!found.length)
+    pick.append(new Option(needle ? "No exact occurrence in this field" : "Type exact text first", ""));
+  const chars = field ? Array.from(field.text) : [];
+  found.forEach(([s, e], k) => {
+    const before = chars.slice(Math.max(0, s - 20), s).join(""), after = chars.slice(e, e + 20).join("");
+    pick.append(new Option(`Occurrence ${k + 1} of ${found.length} (characters ${s + 1}–${e}): …${before}[${chars.slice(s, e).join("")}]${after}…`, `${s}:${e}`));
+  });
+}
+function renderTypedAnnotation() {
+  const fields = annotatableFields();
+  $("annotate-typed").hidden = !fields.length;
+  const pick = $("annotate-field"), keep = pick.value;
+  pick.replaceChildren(...fields.map((f) => new Option(f.label || f.path, f.path)));
+  if (fields.some((f) => f.path === keep)) pick.value = keep;
+  renderTypedOccurrences();
+}
+$("annotate-field").onchange = renderTypedOccurrences;
+$("annotate-text").oninput = renderTypedOccurrences;
+$("use-typed-text").onclick = () => {
+  const field = annotatableFields().find((f) => f.path === $("annotate-field").value);
+  const chosen = $("annotate-occurrence").value;
+  const box = $("answer-selection");
+  if (!field || !chosen) {
+    answerSelection = null;
+    box.textContent = "No occurrence chosen: type text that occurs exactly in the chosen answer field.";
+    return;
+  }
+  const [start, stop] = chosen.split(":").map(Number);
+  answerSelection = rangeFor(field, start, stop);
+  box.textContent = `Selected answer text (${describeRange(answerSelection)}): “${short(answerSelection.text, 120)}”`;
+};
 document.addEventListener("selectionchange", () => {
   const picked = selectedAnswerRange();
   if (picked === undefined) return;
@@ -1829,6 +1886,7 @@ function render() {
   $("evidence-panel").open = true;
   renderDefects();
   renderAnnotations();
+  renderTypedAnnotation();
   $("subjects").replaceChildren();
   [...bundle.claims, ...bundle.references].forEach((c) => {
     const b = el("button", c.text);

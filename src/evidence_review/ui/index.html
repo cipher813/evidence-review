@@ -58,6 +58,14 @@
         <p>Select exact text in the answer under review, then annotate it as supported, defective, cannot verify or incomplete. Annotations record only the passages you choose: they are not an exhaustive review, and an unannotated passage is not thereby supported. Record an omission as a defect without answer text.</p>
         <p id="answer-selection" role="status" aria-live="polite" aria-label="Selected answer text">No answer text selected.</p>
         <div id="annotations" aria-label="Answer annotations"></div>
+        <fieldset id="annotate-typed">
+          <legend>Choose answer text without a mouse</legend>
+          <p id="annotate-typed-help">Pick an answer field, type the exact text (characters must match exactly; nothing is normalised) and choose which occurrence. This selects the same range a mouse selection does; then annotate it.</p>
+          <label>Answer field <select id="annotate-field" aria-label="Answer field to annotate" aria-describedby="annotate-typed-help"></select></label>
+          <label>Exact text <input id="annotate-text" aria-label="Exact answer text to annotate" aria-describedby="annotate-typed-help" /></label>
+          <label>Occurrence <select id="annotate-occurrence" aria-label="Occurrence of the typed text"></select></label>
+          <button id="use-typed-text" type="button">Select this occurrence</button>
+        </fieldset>
         <button id="add-annotation" type="button">Annotate selected answer text</button>
         <h3>Reviewer calculation worksheets</h3>
         <p>Optional. Enter your own formula and inputs when a supplied formula is missing or wrong; the supplied formula is never changed. Attach source passages to each input or mark it unavailable. The arithmetic is recomputed with the same bounded Decimal evaluator and does not decide support.</p>
