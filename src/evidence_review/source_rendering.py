@@ -881,13 +881,66 @@ def _line_maps(nodes):
     return line_nodes, cells_by_line
 
 
+LINE_NOT_CANONICAL = ("does not correspond to the frozen source: a line-faithful derivative must be exactly this "
+                      "package's rendering of the frozen text")
+
+
+def _canonical_line_nodes(source, derivative):
+    """This package's own line-faithful rendering of the frozen text, bounded by the supplied derivative's size.
+
+    ``normalized_snapshot`` and ``faithful_markdown`` derivatives are a deterministic function of the frozen
+    text alone (same tree, same node ids, same line labels), so the canonical tree is rebuilt here rather than
+    trusted. The work bound is the supplied tree's own node count: a canonical rendering larger than what was
+    supplied cannot equal it, and stops instead of growing."""
+    supplied = sum(1 for _ in _walk(derivative.get("nodes", [])))
+    limits = RenderLimits(max_nodes=supplied, max_work=supplied)
+    try:
+        nodes, _, _ = _md_line_tree(source.text, _Budget(limits), [])
+    except RenderLimitExceeded:
+        return None
+    return nodes
+
+
+def _check_line_correspondence(manifest, derivative, source):
+    """Refuse a line-faithful derivative whose text, structure or line labels differ from the frozen source.
+
+    Exact targets are checked first so the refusal names the target whose rendered lines were changed; then
+    the whole tree, because the source-render route serves every node as the context of a highlight."""
+    canonical = _canonical_line_nodes(source, derivative)
+    if canonical is None:
+        raise ValueError(f"rendered derivative {LINE_NOT_CANONICAL}")
+    supplied_by_id = {n["id"]: n for n, _ in _walk(derivative.get("nodes", []))}
+    canonical_by_id = {n["id"]: n for n, _ in _walk(canonical)}
+    canonical_lines, _ = _line_maps(canonical)
+    supplied_lines = {}
+    for n, _ in _walk(derivative.get("nodes", [])):
+        if "line" in n:
+            supplied_lines.setdefault(n["line"], []).append(n["id"])
+    for t in manifest.targets:
+        if t.status != "exact":
+            continue
+        for line in range(t.start_line, t.end_line + 1):
+            want = canonical_lines.get(line)
+            # A separator line maps to its header row and carries no label of its own.
+            if want is not None and canonical_by_id[want].get("line") == line \
+                    and supplied_lines.get(line) != [want]:
+                raise ValueError(f"render target {t.target_id} names line {line}, whose rendered mapping "
+                                 f"{LINE_NOT_CANONICAL}")
+        for nid in {*t.dom_targets, *(canonical_lines.get(x) for x in range(t.start_line, t.end_line + 1))}:
+            if nid is not None and supplied_by_id.get(nid) != canonical_by_id.get(nid):
+                raise ValueError(f"render target {t.target_id} has rendered text that {LINE_NOT_CANONICAL}")
+    if set(derivative) != {"schema_version", "source_id", "render_mode", "nodes"} or derivative["nodes"] != canonical:
+        raise ValueError(f"rendered derivative {LINE_NOT_CANONICAL}")
+
+
 def _proven_exact(manifest, derivative, source, target):
     """The exact target this package's own deterministic mapping derives from the derivative for one citation."""
     citation = Citation(source_id=target.source_id, start_line=target.start_line, end_line=target.end_line,
                         excerpt=target.excerpt, status="located")
     nodes = derivative.get("nodes", [])
     if manifest.render_mode in LINE_MODES:
-        line_nodes, cells = _line_maps(nodes)
+        # The maps come from the canonical rendering of the frozen text, never from the caller's ``line`` labels.
+        line_nodes, cells = _line_maps(_canonical_line_nodes(source, derivative))
         found = _line_targets(source, [citation], line_nodes, cells, target.raw_sha256)[0]
     elif manifest.render_mode == "faithful_html":
         found = _html_targets(source, [citation], nodes, target.raw_sha256)[0]
@@ -908,7 +961,10 @@ def validate_render_asset(bundle, asset):
     deterministic mapping derives from the derivative for that citation: the
     same nodes (and PDF page and box). A caller-supplied manifest cannot claim an
     exact location that is missing, unrelated, or merely holds the same text in
-    another row, period or metric. Refused, never downgraded, like a hash mismatch."""
+    another row, period or metric. A line-faithful derivative (``normalized_snapshot``,
+    ``faithful_markdown``) must also equal, node for node, this package's own rendering of the frozen
+    text, so its line labels, node text and table cells are proven against the frozen source rather than
+    trusted from the caller. Refused, never downgraded, like a hash mismatch."""
     if not isinstance(asset, RenderedSourceAsset):
         raise TypeError("rendered_sources must contain RenderedSourceAsset objects")
     derivative = check_derivative(asset.verify().derivative)
@@ -923,6 +979,8 @@ def validate_render_asset(bundle, asset):
         by_id[node["id"]] = node
         if node["tag"] == "page":
             pages[node.get("page")] = node
+    if manifest.render_mode in LINE_MODES:
+        _check_line_correspondence(manifest, derivative, source)
     for t in manifest.targets:
         named = [*t.dom_targets, *(i for c in t.candidates for i in c)]
         if any(i not in by_id for i in named):
