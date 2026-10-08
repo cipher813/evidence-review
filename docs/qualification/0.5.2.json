@@ -1,0 +1,58 @@
+{
+  "schema_version": "evidence-review-qualification/v1",
+  "package_version": "0.5.2",
+  "source_tree_sha1": "2db87bb35c8ab65d4b9ecb0ad255434e70208548",
+  "verified_source_commit": "24e5c3b32d8ac873c433a120aee416c4285f6f48",
+  "wheel": "evidence_review-0.5.2-py3-none-any.whl",
+  "wheel_sha256": "6ca208171001a55887eecd62db92abe423092d18cdcdc470c2071aff72bfa036",
+  "reproducible_wheel": true,
+  "clean_noneditable_install": true,
+  "installed_files": {
+    "evidence_review/__init__.py": "7b515f7cf32f21d354190c893fede574af4becd1a84566a2fd7da92e17b7bba4",
+    "evidence_review/atomic_evidence.py": "845dacc919519a2e32da135888f51b2efa70fad561f36067270abee0a8216b4a",
+    "evidence_review/cli.py": "ae2523bed0d08a47a12f07ef04446d98b113765d000774008296b77e9e728aba",
+    "evidence_review/contracts.py": "c18fc6f5f71c6ab95901b4e17ac01a7b0d0143738edf4366041545c64dfc2010",
+    "evidence_review/evidence.py": "c980729526e0f47aa5228067dd16b36233b42725d82d19697aaf88ab6c31a3db",
+    "evidence_review/example.py": "478de2b2076833ddf05255596f38ead575f02849f0db8cde727515a808b1c030",
+    "evidence_review/hooks.py": "9937ea39705b8227c8c3c84be08b9d3f1cdeaafa89dd8cfc573556949647c24e",
+    "evidence_review/schemas/atom-evidence-v1.json": "432852b1f5faf747b57192b10ca285c9f78fe959bb555bf8e2f95f8d675e455d",
+    "evidence_review/schemas/review-bundle-v1.json": "1d360e53d45a5b2439eda9c96bce3b42f541eee75a76efd75e7bde6a2b0e5ce7",
+    "evidence_review/schemas/review-submission-v1.json": "7e1918b1f9742cca9dd4a7de7e0ce939e6cb597e8776bc4ede3dc5b5e98e8819",
+    "evidence_review/schemas/source-render-manifest-v1.json": "349f9efa77bda8d47d6d31ed9fbb1ad800986b6def688ef8298c82182655bb07",
+    "evidence_review/server.py": "deca0a61e2c05806bf407075c231f73472e4227f02bd0fed1f094f5db8607efa",
+    "evidence_review/source_rendering.py": "cb620dbbf4fed1acc8faf783e6e0bfbde8a9662ec22e0cb795d8c5a30f88f07a",
+    "evidence_review/store.py": "5a9fcfaff3df5bd4ef7c1c282e2b630159122790d0d7d3578f5d705447b3b70b",
+    "evidence_review/table_context.py": "f2953f2a869bf16da716badac5cb24a01d0e606ba30670fa334916cfe365cb2c",
+    "evidence_review/ui/app.js": "80ce733326716ac11c4549707df99ea17093f3aad212e8fd90e561d3084d2021",
+    "evidence_review/ui/index.html": "01183c345dc7c412526ee199494ae25fbab7c84595a5e9d54bbe9e12313ad823",
+    "evidence_review/ui/styles.css": "dcb99d062e8c7390ed1fd1f5dbc9a2a36dae7bfabe36cdcb417acb7447a7ce1f"
+  },
+  "installed_content_sha256": "a5c28083c6907d54e4ad2d470d9e031175bcd23b24993bcf36c77854bbdb68a2",
+  "schemas": {
+    "atom-evidence-v1.json": "432852b1f5faf747b57192b10ca285c9f78fe959bb555bf8e2f95f8d675e455d",
+    "review-bundle-v1.json": "1d360e53d45a5b2439eda9c96bce3b42f541eee75a76efd75e7bde6a2b0e5ce7",
+    "review-submission-v1.json": "7e1918b1f9742cca9dd4a7de7e0ce939e6cb597e8776bc4ede3dc5b5e98e8819",
+    "source-render-manifest-v1.json": "349f9efa77bda8d47d6d31ed9fbb1ad800986b6def688ef8298c82182655bb07"
+  },
+  "tests_passed": 300,
+  "coverage_percent": 92.63,
+  "verified_by_automation": [
+    "contracts, atom/render sidecars and capability negotiation",
+    "offline rendering of Markdown, HTML and PDF fixtures with exact, page-only and ambiguous targets",
+    "three-pane atomic source-check layout in Chromium at 1400x900 and 640x400 (200% zoom)",
+    "zero outbound requests and no executable markup from hostile HTML",
+    "late hook results fenced and their failures recorded as sanitized events",
+    "atom targets and calculation references bound to their own occurrence evidence; exact rendered targets require frozen-to-original context correspondence (synthetic adversarial fixtures)",
+    "rendered-source navigation fenced in Chromium for both response orders, stale failures and task changes",
+    "Markdown parser progress on literal hash lines within tight work and node budgets",
+    "one check control per assigned atom in atomic mode, with a caller-defined task noun",
+    "assigned atom rows and frozen check controls bound both ways for quantities and facts; omitted, wrong or unknown control ids refused before serving; bound check submits and reloads in Chromium",
+    "occurrence-bound prepared calculations shown and navigable in atomic rows beside the unchanged original candidate evidence, never checking a row (synthetic fixtures, Chromium)"
+  ],
+  "unverified": [
+    "human usability and reviewer effort (no pilot run)",
+    "assistive technology with a real screen reader",
+    "real-corpus HTML/PDF originals (only synthetic fixtures were rendered)",
+    "hosted CI and release publishing for this version"
+  ]
+}

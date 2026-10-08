@@ -1518,6 +1518,7 @@ const ATOM_STATE = {
 const BINDING = {
   span_citation: "cited by the answer for this number",
   prepared_evidence: "independently prepared evidence attributed to this number",
+  prepared_calculation_input: "input of an independently prepared calculation attributed to this occurrence",
   linked_statement_citation: "cited by the statement this fact belongs to",
   declared_atom_citation: "declared for this fact by the caller's atomization",
 };
@@ -1558,6 +1559,36 @@ function describeTarget(t) {
   const source = bundle.sources.find((s) => s.source_id === t.source_id);
   return `${source ? source.title : t.source_id}${where ? " " + where : ""}`;
 }
+// Prepared evidence is shown beside the original candidate evidence, never in its place.
+function renderPreparation(p, r, more) {
+  const box = el("section"); box.className = "atom-preparation"; box.dataset.preparedRef = p.ref;
+  box.setAttribute("aria-label", `${p.label} for “${r.text}”`);
+  box.append(el("h4", p.label), el("p", p.provenance));
+  if (p.reason) box.append(el("p", "Preparation note: " + p.reason));
+  box.append(el("small", `Reference ${p.ref}`));
+  p.targets.forEach((t, k) => {
+    const line = el("p", `Prepared source ${k + 1}: ${describeTarget(t)}`);
+    const open = el("button", "Open prepared source");
+    open.setAttribute("aria-label", `Open prepared source ${k + 1} for “${r.text}”`);
+    open.onclick = () => openTarget(t, open, r, "Independently prepared evidence; not a support judgment");
+    line.append(open); box.append(line);
+  });
+  if (p.calculation) {
+    renderCalculation(p.calculation, box, true, p.calculation.operands, true);
+    if (p.calculation_leaves.length) box.append(el("h5", "Prepared input sources"));
+    p.calculation_leaves.forEach((leaf, k) => {
+      const line = el("p", `Prepared input ${k + 1}: ${leaf.target ? describeTarget(leaf.target) : leaf.source_id} · ${leaf.status}${leaf.reason ? ": " + leaf.reason : ""}`);
+      if (leaf.target) {
+        const open = el("button", "Open prepared input source");
+        open.setAttribute("aria-label", `Open prepared input ${k + 1} source for “${r.text}”`);
+        open.onclick = () => openTarget(leaf.target, open, r, "Input of an independently prepared calculation");
+        line.append(open);
+      }
+      box.append(line);
+    });
+  }
+  more.append(box);
+}
 function renderAtomRows() {
   const box = $("atoms");
   box.hidden = false;
@@ -1597,10 +1628,17 @@ function renderAtomRows() {
       head.append(link);
     }
     if (r.reason) head.append(el("small", "Reason: " + r.reason));
+    const preparations = r.preparations || [];
+    if (preparations.length) {
+      const note = el("small", "Independently prepared evidence is available in the details; it is not a support judgment.");
+      note.className = "atom-prepared-note"; head.append(note);
+    }
     row.append(head);
     const more = el("details"); more.className = "atom-expand";
-    more.append(el("summary", r.calculation ? "Calculation, inputs and sources" : "Evidence details"));
+    more.append(el("summary", r.calculation || preparations.some((p) => p.calculation)
+      ? "Calculation, inputs and sources" : "Evidence details"));
     more.ontoggle = () => { if (more.open) logEvent("atom_row_expanded", r.atom_id); };
+    if (r.calculation && preparations.length) more.append(el("h4", "Original candidate calculation"));
     if (r.calculation) {
       renderCalculation(r.calculation, more, true, r.calculation.operands, true);
       if (r.calculation_leaves.length) {
@@ -1617,6 +1655,7 @@ function renderAtomRows() {
         });
       }
     }
+    preparations.forEach((p) => renderPreparation(p, r, more));
     if (r.numeric_span_id) {
       const span = bundle.spans.find((s) => s.span_id === r.numeric_span_id);
       if (span) renderDiagnostics(span, more);

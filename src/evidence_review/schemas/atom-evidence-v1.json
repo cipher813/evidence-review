@@ -138,6 +138,13 @@
           ],
           "default": null,
           "title": "Calculation Ref"
+        },
+        "prepared_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Prepared Refs",
+          "type": "array"
         }
       },
       "required": [
