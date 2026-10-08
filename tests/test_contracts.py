@@ -97,3 +97,20 @@ def test_span_evidence_is_validated_like_claim_evidence():
     ident["citations"] = [located(6, "24.6%").model_dump(mode="json")]
     with pytest.raises(ValueError, match="identifier spans carry no evidence"):
         type(b).model_validate(data)
+
+
+def test_workload_task_noun_is_optional_display_metadata_that_keeps_sealed_hashes():
+    """evidence-review-I29: a caller-defined noun ("Check 1 of 3") without changing existing bundle identity."""
+    from evidence_review.contracts import ReviewWorkload
+
+    b = example_bundle()
+    data = b.model_dump(mode="json")
+    data["workload"] = {"answer_index": 1, "assigned_answers": 3}
+    plain = validate_bundle(data)
+    assert "task_noun" not in plain.model_dump(mode="json")["workload"]
+    data["workload"]["task_noun"] = ""
+    assert validate_bundle(data).bundle_hash == plain.bundle_hash
+    assert ReviewWorkload(answer_index=1, assigned_answers=3, task_noun="Check").model_dump()["task_noun"] == "Check"
+    for bad in ("<b>Check</b>", "Check 1", " Check", "x" * 41):
+        with pytest.raises(ValueError):
+            ReviewWorkload(answer_index=1, assigned_answers=3, task_noun=bad)

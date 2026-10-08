@@ -723,6 +723,12 @@
           },
           "title": "Expansion Conditions",
           "type": "array"
+        },
+        "task_noun": {
+          "default": "",
+          "pattern": "^(?:[A-Za-z](?:[A-Za-z -]{0,38}[A-Za-z])?)?$",
+          "title": "Task Noun",
+          "type": "string"
         }
       },
       "required": [

@@ -52,6 +52,11 @@ def build_manifest(root, verification, coverage, tests_passed, source_tree):
             "three-pane atomic source-check layout in Chromium at 1400x900 and 640x400 (200% zoom)",
             "zero outbound requests and no executable markup from hostile HTML",
             "late hook results fenced and their failures recorded as sanitized events",
+            "atom targets and calculation references bound to their own occurrence evidence; exact rendered "
+            "targets require frozen-to-original context correspondence (synthetic adversarial fixtures)",
+            "rendered-source navigation fenced in Chromium for both response orders, stale failures and task changes",
+            "Markdown parser progress on literal hash lines within tight work and node budgets",
+            "one check control per assigned atom in atomic mode, with a caller-defined task noun",
         ],
         "unverified": [
             "human usability and reviewer effort (no pilot run)",

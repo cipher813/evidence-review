@@ -6,7 +6,9 @@ execute, fetch a resource or carry an attribute outside the allowlist. Original
 bytes are never modified; every transform is listed in the manifest.
 
 Mapping is deterministic: a citation (frozen source lines plus excerpt) becomes
-an ``exact`` target only when one rendered node set is proven to hold it.
+an ``exact`` target only when one rendered node set is proven to hold it and
+the text around that node corresponds to the cited frozen line (the same table
+row and header, or the whole cited line), even when the excerpt occurs once.
 Duplicates stay ``ambiguous`` with every candidate, a scanned page without a
 text layer is ``page_only`` at best, and anything unproven is ``unavailable``.
 Nothing here decides whether a source supports a statement.
@@ -116,8 +118,17 @@ def _text_of(node):
 # ---------------------------------------------------------------- Markdown / text
 
 
+_MD_HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
+_MD_ITEM = re.compile(r"^\s*(?:[-*+]|\d{1,3}[.)])\s+")
+
+
 def _md_line_tree(text, budget, transforms):
-    """Line-faithful rendering: every frozen line maps to exactly one node."""
+    """Line-faithful rendering: every frozen line maps to exactly one node.
+
+    Progress invariant: every pass of the loop consumes at least one line, or
+    records the line as unsupported syntax and shows it literally. A line that
+    merely starts with ``#`` (``#Heading``, seven hashes, an indented hash) is
+    not a heading here and renders as literal paragraph text."""
     lines = text.splitlines()
     nodes, line_nodes, cells_by_line = [], {}, {}
     i = 0
@@ -133,7 +144,7 @@ def _md_line_tree(text, budget, transforms):
         if not raw.strip():
             i += 1
             continue
-        heading = re.match(r"^(#{1,6})\s+(.*)$", raw)
+        heading = _MD_HEADING.match(raw)
         if heading:
             nodes.append(leaf(f"h{len(heading.group(1))}", i + 1, heading.group(2).strip()))
             i += 1
@@ -188,8 +199,13 @@ def _md_line_tree(text, budget, transforms):
             nodes.append({"id": budget.node(), "tag": "ol" if ordered else "ul", "children": items})
             continue
         para = []
-        while i < len(lines) and lines[i].strip() and not lines[i].lstrip().startswith(("|", "#")) \
-                and not re.match(r"^\s*(?:[-*+]|\d{1,3}[.)])\s+", lines[i]):
+        while i < len(lines) and lines[i].strip() and not lines[i].lstrip().startswith("|") \
+                and not _MD_HEADING.match(lines[i]) and not _MD_ITEM.match(lines[i]):
+            para.append(leaf("line", i + 1, lines[i]))
+            i += 1
+        if not para:
+            # No branch claimed this line: never loop on it; show it literally and say so.
+            transforms.append(f"line {i + 1}: unsupported Markdown syntax shown literally")
             para.append(leaf("line", i + 1, lines[i]))
             i += 1
         nodes.append({"id": budget.node(), "tag": "p", "children": para})
@@ -305,16 +321,71 @@ def _walk(nodes, parent=None):
         yield from _walk(n.get("children", []), n)
 
 
+_MARKUP_PREFIX = re.compile(r"^\s*(?:#{1,6}\s+|>\s*|(?:[-*+]|\d{1,3}[.)])\s+)")
+UNPROVEN_CONTEXT = ("The excerpt occurs in the original, but the text around it does not match the cited frozen "
+                    "line (a different metric, period or passage may hold the same words); location not proven")
+
+
+def _context_text(cited_lines):
+    """The cited frozen lines as prose: block markup removed, whitespace normalized, nothing else changed."""
+    def prose(line):
+        row = _cells(line) if line.lstrip().startswith("|") else None
+        return " ".join(row) if row else _MARKUP_PREFIX.sub("", line, count=1)
+    return _norm(" ".join(prose(line) for line in cited_lines))
+
+
+def _frozen_table(lines, start_line):
+    """Header and cited row cells of the frozen pipe table holding ``start_line`` (None when not a table row)."""
+    row = _cells(lines[start_line - 1]) if lines[start_line - 1].lstrip().startswith("|") else None
+    if row is None:
+        return None
+    top = start_line - 1
+    while top > 0 and lines[top - 1].lstrip().startswith("|"):
+        top -= 1
+    header = _cells(lines[top]) if top < start_line - 1 else None
+    return [_norm(x) for x in header] if header else None, [_norm(x) for x in row]
+
+
 def _html_targets(source, citations, nodes, raw_sha):
+    """Exact only when the hit's own context corresponds to the cited frozen line(s), even for a single hit.
+
+    Correspondence is deterministic text identity, never inference: a table cell
+    needs its row's cells (and the table's header row, when the frozen table has
+    one) to equal the frozen row; any other block must contain the whole cited
+    frozen text. The same number under another metric or period is not exact."""
     lines = source.text.splitlines()
-    leaves, rows = [], []
+    leaves = []
     parents = {}
     for node, parent in _walk(nodes):
         parents[node["id"]] = parent
         if node["tag"] in BLOCK_TAGS:
             leaves.append(node)
-        if node["tag"] == "tr":
-            rows.append(node)
+
+    def cells(row):
+        return [_norm(_text_of(ch)) for ch in row.get("children", [])]
+
+    def header_of(row):
+        table = parents.get(row["id"])
+        while table is not None and table["tag"] != "table":
+            table = parents.get(table["id"])
+        if table is None:
+            return None
+        first = next((n for n, _ in _walk(table.get("children", [])) if n["tag"] == "tr"), None)
+        return cells(first) if first is not None else None
+
+    def corresponds(hit, cited_lines, table):
+        row = parents.get(hit["id"]) if hit["tag"] in ("td", "th") else None
+        if table is not None:
+            header, want = table
+            return (row is not None and row["tag"] == "tr" and cells(row) == want
+                    and (header is None or header_of(row) == header))
+        context = _context_text(cited_lines)
+        if not context:
+            return False
+        if context in _norm(_text_of(hit)):
+            return True
+        return row is not None and row["tag"] == "tr" and context in " ".join(cells(row))
+
     out = []
     for c in citations:
         excerpt = _norm(c.excerpt)
@@ -325,21 +396,17 @@ def _html_targets(source, citations, nodes, raw_sha):
         # Innermost only: a caption containing a cell's text is not a second occurrence.
         hits = [n for n in hits if not any(o is not n and any(d is o for d, _ in _walk(n.get("children", [])))
                                            for o in hits)]
-        cited = "\n".join(lines[c.start_line - 1:c.end_line]) if c.end_line <= len(lines) else ""
-        if len(hits) > 1 and cited.lstrip().startswith("|"):
-            want = [_norm(x) for x in (_cells(cited) or [])]
-            matching = [r for r in rows if [_norm(_text_of(ch)) for ch in r.get("children", [])] == want]
-            if len(matching) == 1:
-                hits = [h for h in hits if parents.get(h["id"]) is matching[0]]
-        elif len(hits) > 1 and _norm(cited):
-            whole = [h for h in hits if _norm(cited).strip("|# ").strip() in _norm(_text_of(h))]
-            if len(whole) == 1:
-                hits = whole
-        if len(hits) == 1:
-            out.append(RenderedSourceTarget(**base, dom_targets=[hits[0]["id"]], status="exact"))
+        cited_lines = lines[c.start_line - 1:c.end_line] if c.end_line <= len(lines) else []
+        table = _frozen_table(lines, c.start_line) if len(cited_lines) == 1 else None
+        proven = [h for h in hits if corresponds(h, cited_lines, table)]
+        if len(proven) == 1:
+            out.append(RenderedSourceTarget(**base, dom_targets=[proven[0]["id"]], status="exact"))
+        elif len(proven) > 1 or len(hits) > 1:
+            shown = proven if len(proven) > 1 else hits
+            out.append(RenderedSourceTarget(**base, status="ambiguous", candidates=[[h["id"]] for h in shown],
+                                            reason=f"Excerpt occurs in {len(shown)} places in the original; none chosen"))
         elif hits:
-            out.append(RenderedSourceTarget(**base, status="ambiguous", candidates=[[h["id"]] for h in hits],
-                                            reason=f"Excerpt occurs in {len(hits)} places in the original; none chosen"))
+            out.append(RenderedSourceTarget(**base, status="unavailable", reason=UNPROVEN_CONTEXT))
         else:
             out.append(RenderedSourceTarget(**base, status="unavailable",
                                             reason="Excerpt not found in the sanitized original"))
@@ -564,13 +631,13 @@ def _pdf_targets(source, citations, pages, raw_sha, page_map):
         base = dict(target_id=target_identity(source.source_id, source.sha256, c.start_line, c.end_line, c.excerpt),
                     source_id=source.source_id, frozen_sha256=source.sha256, raw_sha256=raw_sha,
                     start_line=c.start_line, end_line=c.end_line, excerpt=c.excerpt)
-        starts = [m.start() for m in re.finditer(re.escape(excerpt), text)] if excerpt else []
-        if len(starts) > 1:
-            cited = _norm(" ".join(lines[c.start_line - 1:c.end_line]))
-            wider = [m.start() for m in re.finditer(re.escape(cited), text)] if cited else []
-            if len(wider) == 1:
-                inner = text.find(excerpt, wider[0])
-                starts = [inner] if inner != -1 and inner < wider[0] + len(cited) else starts
+        found = [m.start() for m in re.finditer(re.escape(excerpt), text)] if excerpt else []
+        # Exact only inside an occurrence of the whole cited frozen text, even for a single hit.
+        cited = _context_text(lines[c.start_line - 1:c.end_line]) if c.end_line <= len(lines) else ""
+        wider = [m.start() for m in re.finditer(re.escape(cited), text)] if cited else []
+        starts = [at for at in found if any(w <= at and at + len(excerpt) <= w + len(cited) for w in wider)]
+        if not starts and len(found) > 1:
+            starts = found
 
         def cover(at):
             end = at + len(excerpt)
@@ -595,7 +662,10 @@ def _pdf_targets(source, citations, pages, raw_sha, page_map):
                                             reason=f"Excerpt occurs {len(starts)} times in the PDF text layer"))
         elif c.start_line in page_map and page_map[c.start_line] <= len(pages):
             out.append(RenderedSourceTarget(**base, status="page_only", page=page_map[c.start_line],
-                                            reason="Page has no usable text layer; the page is shown, not the line"))
+                                            reason="Page has no usable text layer; the page is shown, not the line"
+                                            if not found else UNPROVEN_CONTEXT + "; the caller's page is shown"))
+        elif found:
+            out.append(RenderedSourceTarget(**base, status="unavailable", reason=UNPROVEN_CONTEXT))
         else:
             out.append(RenderedSourceTarget(**base, status="unavailable",
                                             reason="Excerpt not found in the PDF text layer"))

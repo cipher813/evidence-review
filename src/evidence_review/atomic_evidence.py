@@ -141,9 +141,14 @@ class Atomization(Strict):
 
 
 class AtomCitation(Strict):
-    """A caller-declared located citation for a fact atom, validated against frozen text."""
+    """A caller-declared located citation for a fact atom, validated against frozen text.
+
+    ``atom_ids`` attributes the citation to the exact fact occurrences it was
+    declared for; a fact atom may navigate to a declared citation only when it
+    is named here (or the citation is one of its linked claims' own)."""
     target_id: str = Field(pattern=r"^tgt:[0-9a-f]{24}$")
     citation: Citation
+    atom_ids: list[str] = Field(default_factory=list)
 
 
 class AtomEvidenceManifest(Strict):
@@ -259,7 +264,9 @@ def build_atom_manifest(bundle, facts=(), *, method="evidence-review/numeric-inv
         state = fact.get("evidence_state") or ("located" if len(cites) == 1 else "ambiguous" if cites else "unavailable")
         targets = [citation_target_id(bundle, c) for c in cites]
         for t, c in zip(targets, cites):
-            declared.setdefault(t, AtomCitation(target_id=t, citation=c))
+            entry = declared.setdefault(t, AtomCitation(target_id=t, citation=c))
+            if atom_id not in entry.atom_ids:
+                entry.atom_ids.append(atom_id)
         items.append(AtomEvidenceItem(
             atom_id=atom_id, bundle_hash=bundle.bundle_hash, field_path=fact["field_path"], start=start, end=end,
             text=field.text[start:end], kind="fact", claim_ids=list(fact.get("claim_ids", [])),
@@ -303,6 +310,55 @@ def _calculation_for(bundle, ref):
         claim = next((c for c in bundle.claims if c.claim_id == ident), None)
         return claim.calculation if claim else None
     return None
+
+
+def _located_ids(bundle, citations):
+    return [t for t in (citation_target_id(bundle, c) for c in citations) if t]
+
+
+def atom_target_bindings(bundle, manifest, item):
+    """Targets this one atom may navigate to, each labelled with where its binding comes from.
+
+    A quantity is bound to its own span's citations or to the span's explicitly
+    attributed ``prepared_evidence`` records, both occurrence-bound by the span
+    id. A fact is bound to its linked claims' or references' own citations, or
+    to a declared citation attributed to this exact atom. Nothing else in the
+    bundle's target pool is this atom's evidence."""
+    bound = {}
+    if item.kind == "quantity":
+        span = next((s for s in bundle.spans if s.span_id == item.numeric_span_id), None)
+        if span is None:
+            return bound
+        for t in _located_ids(bundle, span.citations):
+            bound.setdefault(t, "span_citation")
+        for p in span.prepared_evidence:
+            for t in _located_ids(bundle, p.citations):
+                bound.setdefault(t, "prepared_evidence")
+        return bound
+    linked = set(item.claim_ids)
+    for c in [*bundle.claims, *bundle.references]:
+        if (getattr(c, "claim_id", None) or getattr(c, "reference_id", None)) in linked:
+            for t in _located_ids(bundle, c.citations):
+                bound.setdefault(t, "linked_statement_citation")
+    for d in manifest.citations:
+        if item.atom_id in d.atom_ids:
+            bound.setdefault(d.target_id, "declared_atom_citation")
+    return bound
+
+
+def calculation_bound(bundle, item):
+    """Whether this atom's calculation reference is its own occurrence's calculation."""
+    kind, _, ident = (item.calculation_ref or "").partition(":")
+    if item.kind == "quantity":
+        return kind == "span" and ident == item.numeric_span_id
+    if kind == "claim":
+        return ident in item.claim_ids
+    if kind == "span":
+        span = next((s for s in bundle.spans if s.span_id == ident), None)
+        # A fact may use the calculation of a number written inside its own words.
+        return (span is not None and span.field_path == item.field_path and item.start <= span.start
+                and span.end <= item.end)
+    return False
 
 
 def validate_atom_evidence(bundle, payload, render_manifests=()):
@@ -353,6 +409,12 @@ def validate_atom_evidence(bundle, payload, render_manifests=()):
                 raise ValueError("atom references an unknown citation target")
         if item.calculation_ref and _calculation_for(bundle, item.calculation_ref) is None:
             raise ValueError("atom references an unknown calculation")
+        if item.calculation_ref and not calculation_bound(bundle, item):
+            raise ValueError("atom calculation is not its own occurrence's calculation")
+        bound = atom_target_bindings(bundle, manifest, item)
+        for t in [*item.citation_target_ids, *item.candidate_target_ids]:
+            if t not in bound:
+                raise ValueError("atom target is not bound to this atom's own evidence")
         if item.kind == "quantity":
             span = spans.get(item.numeric_span_id)
             if (span is None or span.state == "identifier" or (span.field_path, span.start, span.end)
@@ -391,6 +453,9 @@ def validate_atom_evidence(bundle, payload, render_manifests=()):
             raise ValueError("a fact check has no atom row")
         if f.numeric_span_id and f.numeric_span_id in asserted and f.numeric_span_id not in quantity_spans:
             raise ValueError("a quantity check has no atom row")
+    fact_ids = {i.atom_id for i in manifest.items if i.kind == "fact"}
+    if any(set(d.atom_ids) - fact_ids for d in manifest.citations):
+        raise ValueError("declared atom citation is attributed to an unknown fact atom")
     return manifest
 
 
@@ -403,18 +468,23 @@ def atom_view(bundle, manifest, render_manifests=()):
     rows = []
     for item in manifest.items:
         calc = _calculation_for(bundle, item.calculation_ref)
+        bindings = atom_target_bindings(bundle, manifest, item)
 
-        def describe(tid):
+        def describe(tid, binding=None):
             t = targets.get(tid)
             if t is None:
                 c = cited.get(tid)
                 frozen = {"source_id": c.source_id, "start_line": c.start_line, "end_line": c.end_line,
                           "excerpt": c.excerpt} if c else {}
-                return {"target_id": tid, "status": "frozen_text", **frozen, "rendered": False,
-                        "reason": "No rendered source supplied for this citation; the frozen text line opens instead."}
-            return {"target_id": tid, "source_id": t.source_id, "status": t.status, "reason": t.reason,
-                    "start_line": t.start_line, "end_line": t.end_line, "page": t.page,
-                    "rendered": t.source_id in rendered}
+                out = {"target_id": tid, "status": "frozen_text", **frozen, "rendered": False,
+                       "reason": "No rendered source supplied for this citation; the frozen text line opens instead."}
+            else:
+                out = {"target_id": tid, "source_id": t.source_id, "status": t.status, "reason": t.reason,
+                       "start_line": t.start_line, "end_line": t.end_line, "page": t.page,
+                       "rendered": t.source_id in rendered}
+            if binding:
+                out["binding"] = binding
+            return out
 
         leaves = []
         if calc is not None:
@@ -422,10 +492,10 @@ def atom_view(bundle, manifest, render_manifests=()):
                 tid = citation_target_id(bundle, leaf)
                 leaves.append({"source_id": leaf.source_id, "status": leaf.status, "reason": leaf.reason,
                                "start_line": leaf.start_line, "end_line": leaf.end_line,
-                               "target": describe(tid) if tid else None})
+                               "target": describe(tid, "calculation_input") if tid else None})
         rows.append({**item.model_dump(mode="json"),
-                     "targets": [describe(t) for t in item.citation_target_ids],
-                     "candidates": [describe(t) for t in item.candidate_target_ids],
+                     "targets": [describe(t, bindings.get(t)) for t in item.citation_target_ids],
+                     "candidates": [describe(t, bindings.get(t)) for t in item.candidate_target_ids],
                      "calculation": calc.model_dump(mode="json") if calc else None,
                      "calculation_leaves": leaves})
     return {"schema_version": manifest.schema_version, "provenance": manifest.provenance,

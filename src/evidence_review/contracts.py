@@ -10,7 +10,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator, model_serializer
 
 
-PACKAGE_VERSION = "0.5.0"
+PACKAGE_VERSION = "0.5.1"
 
 
 def canonical_json(value) -> bytes:
@@ -219,12 +219,23 @@ class ReviewWorkload(Strict):
     task_counts: dict[str, int] = Field(default_factory=dict)
     assignment_reason: str = ""
     expansion_conditions: list[str] = Field(default_factory=list)
+    # Caller-defined generic noun for one unit of this workload ("Check" shows
+    # "Check 1 of 3"). Display only; empty keeps the package's Answer/Task label.
+    task_noun: str = Field(default="", pattern=r"^(?:[A-Za-z](?:[A-Za-z -]{0,38}[A-Za-z])?)?$")
 
     @model_validator(mode="after")
     def counts(self):
         if self.answer_index > self.assigned_answers or any(v < 0 for v in self.task_counts.values()):
             raise ValueError("invalid assigned workload counts")
         return self
+
+    @model_serializer(mode="wrap")
+    def preserve_legacy_fields(self, handler):
+        data = handler(self)
+        # Optional display extension must not alter hashes of already sealed bundles.
+        if not self.task_noun:
+            data.pop("task_noun", None)
+        return data
 
 
 class ReferenceItem(Strict):
