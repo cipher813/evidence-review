@@ -1,10 +1,10 @@
 {
   "schema_version": "evidence-review-qualification/v1",
   "package_version": "0.5.7",
-  "source_tree_sha1": "0000000000000000000000000000000000000000",
-  "verified_source_commit": "0000000000000000000000000000000000000000",
+  "source_tree_sha1": "92a4fd79d0c704b220c45dd43fcd59b0632da77d",
+  "verified_source_commit": "c4a4cd648f1c8116f70a2f941b947783c51bf087",
   "wheel": "evidence_review-0.5.7-py3-none-any.whl",
-  "wheel_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "wheel_sha256": "8b213d08d4d07d18e251353f3ecab4f31e8d8c44520127b62e5ac1658cbe6e18",
   "reproducible_wheel": true,
   "clean_noneditable_install": true,
   "installed_files": {
@@ -34,8 +34,8 @@
     "review-submission-v1.json": "7e1918b1f9742cca9dd4a7de7e0ce939e6cb597e8776bc4ede3dc5b5e98e8819",
     "source-render-manifest-v1.json": "349f9efa77bda8d47d6d31ed9fbb1ad800986b6def688ef8298c82182655bb07"
   },
-  "tests_passed": 0,
-  "coverage_percent": 0,
+  "tests_passed": 380,
+  "coverage_percent": 93.4,
   "verified_by_automation": [
     "contracts, atom/render sidecars and capability negotiation",
     "offline rendering of Markdown, HTML and PDF fixtures with exact, page-only and ambiguous targets",
