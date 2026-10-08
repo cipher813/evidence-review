@@ -57,6 +57,10 @@ def build_manifest(root, verification, coverage, tests_passed, source_tree):
             "rendered-source navigation fenced in Chromium for both response orders, stale failures and task changes",
             "Markdown parser progress on literal hash lines within tight work and node budgets",
             "one check control per assigned atom in atomic mode, with a caller-defined task noun",
+            "assigned atom rows and frozen check controls bound both ways for quantities and facts; omitted, wrong "
+            "or unknown control ids refused before serving; bound check submits and reloads in Chromium",
+            "occurrence-bound prepared calculations shown and navigable in atomic rows beside the unchanged "
+            "original candidate evidence, never checking a row (synthetic fixtures, Chromium)",
         ],
         "unverified": [
             "human usability and reviewer effort (no pilot run)",

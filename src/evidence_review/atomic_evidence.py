@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, model_serializer, model_validator
 
 from .contracts import ATOM_CONTRACT, Citation, Strict, atom_identity, digest
 from .evidence import calculation_citations, validate_citation
@@ -108,6 +108,10 @@ class AtomEvidenceItem(Strict):
     candidate_target_ids: list[str] = Field(default_factory=list)
     # The calculation is read from the bound span or claim, never restated here.
     calculation_ref: str | None = None
+    # Independently prepared evidence for this occurrence, ``prepared:<span id>:<index>``
+    # into that span's ``prepared_evidence``. Shown beside the original candidate
+    # evidence, never instead of it, and never a support judgment.
+    prepared_refs: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def shape(self):
@@ -125,7 +129,17 @@ class AtomEvidenceItem(Strict):
             raise ValueError("unresolved atom needs a reason")
         if self.evidence_state != "ambiguous" and self.candidate_target_ids:
             raise ValueError("only ambiguous atoms carry candidates")
+        if len(set(self.prepared_refs)) != len(self.prepared_refs):
+            raise ValueError("duplicate prepared evidence reference")
         return self
+
+    @model_serializer(mode="wrap")
+    def omit_empty_extension(self, handler):
+        data = handler(self)
+        # Optional extension: manifests without preparation serialize as before.
+        if not self.prepared_refs:
+            data.pop("prepared_refs", None)
+        return data
 
 
 class Atomization(Strict):
@@ -222,13 +236,29 @@ def _span_targets(bundle, span):
     return [], "unavailable", None
 
 
+def prepared_ref(span, index):
+    return f"prepared:{span.span_id}:{index}"
+
+
+def _prepared_for(bundle, ref):
+    """The (span, PreparedEvidence) a ``prepared:<span id>:<index>`` reference names, or None."""
+    kind, _, rest = (ref or "").partition(":")
+    span_id, _, index = rest.rpartition(":")
+    if kind != "prepared" or not index.isdigit() or str(int(index)) != index:
+        return None
+    span = next((s for s in bundle.spans if s.span_id == span_id), None)
+    if span is None or int(index) >= len(span.prepared_evidence):
+        return None
+    return span, span.prepared_evidence[int(index)]
+
+
 def build_atom_manifest(bundle, facts=(), *, method="evidence-review/numeric-inventory", version="1",
                         record_sha256="", coverage="complete", scope_fields=None, assigned_span_ids=None,
                         provenance="contemporaneous"):
     """Quantity atoms from the bundle's own numeric inventory plus caller facts.
 
     ``facts`` are dicts ``{field_path, start, end, claim_ids, evidence_state,
-    reason, citations, calculation_ref}`` declared by the caller's atomization;
+    reason, citations, calculation_ref, prepared_refs}`` declared by the caller's atomization;
     ``citations`` are bundle Citation objects. With ``coverage="assigned"``
     only ``assigned_span_ids`` become quantity atoms and every other asserted
     number in scope is recorded as context, so nothing is silently dropped.
@@ -255,7 +285,8 @@ def build_atom_manifest(bundle, facts=(), *, method="evidence-review/numeric-inv
             reason=span.reason or ({"ambiguous": "Several candidate sources; no unique match",
                                     "unavailable": "No source located for this number"}.get(state, "")),
             citation_target_ids=targets if state == "located" else [],
-            candidate_target_ids=targets if state == "ambiguous" else [], calculation_ref=calc))
+            candidate_target_ids=targets if state == "ambiguous" else [], calculation_ref=calc,
+            prepared_refs=[prepared_ref(span, i) for i in range(len(span.prepared_evidence))]))
     for fact in facts:
         field = fields[fact["field_path"]]
         start, end = fact["start"], fact["end"]
@@ -273,7 +304,7 @@ def build_atom_manifest(bundle, facts=(), *, method="evidence-review/numeric-inv
             form_field_id=fact_checks.get(atom_id), evidence_state=state, reason=fact.get("reason", ""),
             citation_target_ids=targets if state == "located" else [],
             candidate_target_ids=targets if state == "ambiguous" else [],
-            calculation_ref=fact.get("calculation_ref")))
+            calculation_ref=fact.get("calculation_ref"), prepared_refs=list(fact.get("prepared_refs", ()))))
     context = [s.span_id for s in asserted if s.span_id not in assigned]
     return AtomEvidenceManifest(
         bundle_id=bundle.bundle_id, bundle_hash=bundle.bundle_hash, provenance=provenance,
@@ -361,6 +392,50 @@ def calculation_bound(bundle, item):
     return False
 
 
+def _validate_check_binding(item, form, checks):
+    """Bidirectional row/control binding: a row names exactly the frozen check bound to its occurrence.
+
+    The bundle's form is immutable; a sidecar may neither hide a check the form
+    binds to this atom (omitted or replaced id) nor claim a control the form
+    does not bind to it. A row with no bound check stays legitimately unassigned."""
+    expected = checks.get(item.numeric_span_id if item.kind == "quantity" else item.atom_id)
+    what = (f"quantity atom {item.atom_id} (number {item.text!r} at {item.field_path}:{item.start}-{item.end})"
+            if item.kind == "quantity" else f"fact atom {item.atom_id} ({item.field_path}:{item.start}-{item.end})")
+    if item.form_field_id is not None and item.form_field_id not in form:
+        raise ValueError(f"{what} names check control {item.form_field_id!r}, which the frozen form does not have")
+    if expected is None and item.form_field_id is not None:
+        raise ValueError(f"{what} names check control {item.form_field_id!r}, which the frozen form does not "
+                         "bind to this atom")
+    if expected is not None and item.form_field_id is None:
+        raise ValueError(f"{what} omits its frozen check control {expected!r}; "
+                         "set form_field_id so the required control stays reachable")
+    if expected is not None and item.form_field_id != expected:
+        raise ValueError(f"{what} names check control {item.form_field_id!r}, but the frozen form binds "
+                         f"{expected!r} to it")
+
+
+def _validate_prepared_refs(bundle, item):
+    """Prepared references are this occurrence's own preparation, and a number lists all of its own."""
+    for ref in item.prepared_refs:
+        found = _prepared_for(bundle, ref)
+        if found is None:
+            raise ValueError(f"atom references unknown prepared evidence {ref!r}")
+        span = found[0]
+        if item.kind == "quantity":
+            own = span.span_id == item.numeric_span_id
+        else:
+            # A fact may show the preparation of a number written inside its own words.
+            own = span.field_path == item.field_path and item.start <= span.start and span.end <= item.end
+        if not own:
+            raise ValueError(f"prepared evidence {ref!r} belongs to another occurrence, not this atom's own")
+    if item.kind == "quantity":
+        span = next((s for s in bundle.spans if s.span_id == item.numeric_span_id), None)
+        expected = [prepared_ref(span, i) for i in range(len(span.prepared_evidence))] if span else []
+        if span is not None and item.prepared_refs != expected:
+            raise ValueError("quantity atom must list exactly its own span's prepared evidence, in order; "
+                             "known prepared evidence is never hidden")
+
+
 def validate_atom_evidence(bundle, payload, render_manifests=()):
     """Structural, occurrence and hash integrity of an atom inventory.
 
@@ -386,6 +461,8 @@ def validate_atom_evidence(bundle, payload, render_manifests=()):
     scope = set(manifest.atomization.scope_fields)
     if scope - answer.keys():
         raise ValueError("atomization scope names a non-answer field")
+    quantity_checks = {f.numeric_span_id: f.field_id for f in bundle.form if f.numeric_span_id}
+    fact_checks = {f.atom.atom_id: f.field_id for f in bundle.form if f.atom}
     ids, quantity_spans, facts = set(), set(), {}
     for item in manifest.items:
         field = answer.get(item.field_path)
@@ -407,10 +484,15 @@ def validate_atom_evidence(bundle, payload, render_manifests=()):
         for t in [*item.citation_target_ids, *item.candidate_target_ids]:
             if t not in known_targets:
                 raise ValueError("atom references an unknown citation target")
+        if (item.calculation_ref or "").startswith("prepared:"):
+            raise ValueError("a prepared calculation never replaces an atom's original calculation_ref; "
+                             "list it in prepared_refs")
         if item.calculation_ref and _calculation_for(bundle, item.calculation_ref) is None:
             raise ValueError("atom references an unknown calculation")
         if item.calculation_ref and not calculation_bound(bundle, item):
             raise ValueError("atom calculation is not its own occurrence's calculation")
+        _validate_prepared_refs(bundle, item)
+        _validate_check_binding(item, form, quantity_checks if item.kind == "quantity" else fact_checks)
         bound = atom_target_bindings(bundle, manifest, item)
         for t in [*item.citation_target_ids, *item.candidate_target_ids]:
             if t not in bound:
@@ -423,10 +505,6 @@ def validate_atom_evidence(bundle, payload, render_manifests=()):
             if item.numeric_span_id in quantity_spans:
                 raise ValueError("number atomized twice")
             quantity_spans.add(item.numeric_span_id)
-            if item.form_field_id:
-                f = form.get(item.form_field_id)
-                if f is None or f.numeric_span_id != item.numeric_span_id:
-                    raise ValueError("quantity atom check is not its span's check")
         else:
             if any(s.field_path == item.field_path and (s.start, s.end) == (item.start, item.end) for s in spans.values()):
                 raise ValueError("a bare number is a quantity atom, not a fact")
@@ -434,10 +512,6 @@ def validate_atom_evidence(bundle, payload, render_manifests=()):
                 if item.start < other[1] and other[0] < item.end:
                     raise ValueError("overlapping fact atoms")
             facts.setdefault(item.field_path, []).append((item.start, item.end))
-            if item.form_field_id:
-                f = form.get(item.form_field_id)
-                if f is None or f.atom is None or f.atom.atom_id != item.atom_id:
-                    raise ValueError("fact atom check is not bound to this atom")
     asserted = {s.span_id for s in bundle.spans if s.field_path in scope and s.state != "identifier"}
     context = set(manifest.atomization.context_span_ids)
     if context & quantity_spans or context - asserted:
@@ -457,6 +531,10 @@ def validate_atom_evidence(bundle, payload, render_manifests=()):
     if any(set(d.atom_ids) - fact_ids for d in manifest.citations):
         raise ValueError("declared atom citation is attributed to an unknown fact atom")
     return manifest
+
+
+PREPARATION_PROVENANCE = ("Independently prepared for review and attributed to this exact occurrence; not "
+                          "supplied by the answer, not a support judgment, and it never checks a row.")
 
 
 def atom_view(bundle, manifest, render_manifests=()):
@@ -486,18 +564,34 @@ def atom_view(bundle, manifest, render_manifests=()):
                 out["binding"] = binding
             return out
 
-        leaves = []
-        if calc is not None:
-            for leaf in calculation_citations(calc):
+        def leaves_of(calculation, binding):
+            out = []
+            for leaf in calculation_citations(calculation) if calculation is not None else ():
                 tid = citation_target_id(bundle, leaf)
-                leaves.append({"source_id": leaf.source_id, "status": leaf.status, "reason": leaf.reason,
-                               "start_line": leaf.start_line, "end_line": leaf.end_line,
-                               "target": describe(tid, "calculation_input") if tid else None})
-        rows.append({**item.model_dump(mode="json"),
+                out.append({"source_id": leaf.source_id, "status": leaf.status, "reason": leaf.reason,
+                            "start_line": leaf.start_line, "end_line": leaf.end_line,
+                            "target": describe(tid, binding) if tid else None})
+            return out
+
+        preparations = []
+        for k, ref in enumerate(item.prepared_refs):
+            span, prepared = _prepared_for(bundle, ref)
+            noun = "calculation" if prepared.calculation else "evidence"
+            preparations.append({
+                "ref": ref, "span_id": span.span_id, "origin": prepared.origin,
+                "label": f"Independently prepared {noun}" + (f" {k + 1} of {len(item.prepared_refs)}"
+                                                            if len(item.prepared_refs) > 1 else ""),
+                "provenance": PREPARATION_PROVENANCE, "reason": prepared.reason,
+                "targets": [describe(t, "prepared_evidence") for t in _located_ids(bundle, prepared.citations)],
+                "calculation": prepared.calculation.model_dump(mode="json") if prepared.calculation else None,
+                "calculation_leaves": leaves_of(prepared.calculation, "prepared_calculation_input")})
+        rows.append({**item.model_dump(mode="json"), "prepared_refs": list(item.prepared_refs),
                      "targets": [describe(t, bindings.get(t)) for t in item.citation_target_ids],
                      "candidates": [describe(t, bindings.get(t)) for t in item.candidate_target_ids],
                      "calculation": calc.model_dump(mode="json") if calc else None,
-                     "calculation_leaves": leaves})
+                     "calculation_leaves": leaves_of(calc, "calculation_input"),
+                     # Kept apart from the original candidate evidence above; never merged into it.
+                     "preparations": preparations})
     return {"schema_version": manifest.schema_version, "provenance": manifest.provenance,
             "atomization": manifest.atomization.model_dump(mode="json"), "rows": rows,
             "verification_note": "Opening a source, matching a number or recomputing arithmetic never checks a row."}
