@@ -88,6 +88,10 @@ def build_manifest(root, verification, coverage, tests_passed, source_tree):
             "(Chromium)",
             "explicitly associated headers classified as row or column by their declared scope (row/rowgroup/col/"
             "colgroup) before geometry (Chromium)",
+            "citation ranges spanning blank lines map to exact targets over their non-blank lines; all-blank ranges "
+            "unavailable; excerpt must occur in the range (synthetic, Chromium)",
+            "ambiguous numbers with fewer than two located candidates shown as unavailable with a reason instead of "
+            "refusing the bundle; ambiguous never shown as located (synthetic shaped like real Primer bundles)",
         ],
         "unverified": [
             "human usability and reviewer effort (no pilot run)",
