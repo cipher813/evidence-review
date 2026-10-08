@@ -86,6 +86,8 @@ def build_manifest(root, verification, coverage, tests_passed, source_tree):
             "table header context from an occupied-cell grid honouring rowspan/colspan, explicit headers and scope, "
             "nested tables isolated, ambiguous associations shown as unavailable in visible and accessible text "
             "(Chromium)",
+            "explicitly associated headers classified as row or column by their declared scope (row/rowgroup/col/"
+            "colgroup) before geometry (Chromium)",
         ],
         "unverified": [
             "human usability and reviewer effort (no pilot run)",
