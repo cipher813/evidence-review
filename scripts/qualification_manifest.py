@@ -92,6 +92,18 @@ def build_manifest(root, verification, coverage, tests_passed, source_tree):
             "unavailable; excerpt must occur in the range (synthetic, Chromium)",
             "ambiguous numbers with fewer than two located candidates shown as unavailable with a reason instead of "
             "refusing the bundle; ambiguous never shown as located (synthetic shaped like real Primer bundles)",
+            "answer-annotation/v1: reviewer-selected answer ranges in Unicode code points bound to field and document "
+            "digests, the chosen occurrence of repeated text kept; unknown, context, stale, out-of-bounds or mismatched "
+            "ranges refused; draft, restart, stale tab, amendment and export preserve annotations (synthetic, Chromium)",
+            "keyboard-only answer annotation: answer field, exact text and occurrence picker give the same code-point "
+            "range as a mouse selection, across astral and combining characters (Chromium)",
+            "reviewer-calculation-worksheet/v1: reviewer-authored formula and operands with source passages or "
+            "unavailable reasons, recomputed by the bounded Decimal evaluator with explicit calculation errors; unsafe "
+            "or non-finite input refused; supplied formulas and support never changed; draft, restart, revision and "
+            "export preserve it (synthetic, Chromium)",
+            "worksheets linked to answer annotations by annotation_id; a dangling link is refused on save and submit, "
+            "so a linked annotation cannot be removed; started from an annotation card (synthetic, Chromium)",
+            "answers, submissions and exports without annotations or worksheets keep their earlier bytes and hashes",
         ],
         "unverified": [
             "human usability and reviewer effort (no pilot run)",
