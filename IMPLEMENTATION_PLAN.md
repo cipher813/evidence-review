@@ -23,3 +23,42 @@ Use artificial bundle; select support and source spans, add material defect, rel
 
 ## Handoff
 Read SPEC.md and this plan, implement task by task in an isolated worktree, use synthetic fixtures, run unit/contract/real-browser/package checks, then open a ready PR. This package is built and verified before an application consumer is integrated. The package contains only generic data contracts and review behavior.
+
+## Capability extension plan — source-grounded human review (2026-10-08)
+
+Baseline: v0.5.8, commit `500de606f847c399eaf09da993cb207290abc329`. This section records missing reusable capabilities after a source-level audit; it is not an implementation or browser-qualification claim. Historical bootstrap tasks above remain unchanged. Synthetic fixtures only; no consumer-specific sampling, grading policy, model orchestration or real reports belong in this package.
+
+### Existing capabilities to reuse
+
+- `ReviewBundle.fields`/`ReportField` display complete answers and context; `claims`, numeric spans and source bindings provide navigation.
+- `FormField` supports caller-defined choice/text/boolean checklists, multiple judgments, evidence and explanation requirements. The caller supplies the actual checklist and materiality policy.
+- `Selection`, source search/rendering and calculation cards provide frozen passages, input evidence, formula/result diagnostics and explicit unresolved states.
+- `Defect`/`renderDefects` support reviewer-added material omissions with source passages even without an existing claim ID.
+- `FileStore`, revisions, hooks and export retain drafts/submissions, elapsed review time, restart and caller backup status.
+- Independent-task disclosure rejection and caller-provided blind markers exist. Callers control cross-task completion, authorization to disclose later comparisons, their own comparison artifacts and queue size. The package must not invent these policies.
+
+### Missing reusable capability M1 — reviewer-selected answer annotations
+
+**Observed gap:** `Selection` binds source lines, not answer passages. `store.validate_answers` rejects judgment keys absent from `bundle.form`; `Defect` links existing claims or free-text notes but lacks an exact answer-range binding. There is no durable generic supported/defective/unverifiable annotation for an arbitrary passage outside the caller's claim inventory. Free-text notes are insufficient to bind the reviewed occurrence reproducibly.
+
+**Deliver:** allow the reviewer to select exact text in an original answer field and create a stable annotation carrying field path, exact offsets/text, report/document hash, disposition, reason, materiality where applicable and source selections. Support supported/defective/cannot-verify and explicit incomplete findings; do not force a potential issue to be declared defective. Keep omission records possible without an answer range. Use one versioned annotation contract shared by source selection, persistence, UI and export; retain original reports and old bundle/submission identities.
+
+**Anchors:** `src/evidence_review/contracts.py` (`Selection`, `Judgment`, `Defect`, `ReviewSubmission`), `store.py::validate_answers`, `ui/app.js::fieldControl/renderDefects`, schemas and export. Extend existing primitives rather than a parallel review store.
+
+**Acceptance:** real-browser selection of prose omitted from claims; repeated identical text bound to the chosen occurrence; Unicode offsets validated across browser/Python; supported and unverifiable notes persist; invalid/stale/out-of-bounds ranges fail; original bytes remain unchanged; draft/restart, stale tabs, amendments, export and restore preserve annotations. Old records still validate and hash identically. No automatic claim of exhaustive review.
+
+### Missing reusable capability M2 — reviewer-authored calculation worksheet
+
+**Observed gap:** calculation cards recompute caller-supplied formulas through `evidence.calculate`; the UI/server do not expose an editable, durable reviewer calculation. A wrong or missing supplied formula cannot be independently recomputed and saved as structured reviewer evidence within the app.
+
+**Deliver:** an optional worksheet for reviewer-entered formula, operands, units/periods/entity/metric, operand source selections, reported value and tolerance. Reuse the bounded Decimal evaluator and existing source validation; label every worksheet as reviewer-authored and separate from candidate/prepared calculations. Link it to an existing subject or an M1 answer annotation. Save inputs, result or explicit calculation error, rationale and provenance through the existing store/export. Never overwrite the original formula or infer semantic support from arithmetic.
+
+**Anchors:** `contracts.py::Calculation/Operand`, `evidence.py::calculate`, `server.py`, `ui/app.js` calculation rendering, `store.py`, schemas and export. M1 is needed only for links to newly selected answer passages.
+
+**Acceptance:** create a worksheet when no formula was supplied; correct a deliberately wrong formula without altering it; attach multiple operand passages; retain unavailable operands and unknown support; reject unsafe/nonfinite expressions and retain division-by-zero errors explicitly. Browser recomputation, autosave/restart, revision and export must preserve the exact reviewer calculation. Existing formulas and historical submissions remain unchanged.
+
+### Completion and ownership
+
+Package maintainer owns M1/M2; tracking: [evidence-review-I40](https://github.com/nousergon/evidence-review/issues/40). Implement under a separately authorized implementation arc, run contract/unit/real-browser and full package checks, and publish a pinned release through the established release process. A consumer must separately qualify its complete workflow against that pin. Existing functionality above needs consumer fixtures, not duplicate package implementations.
+
+SOTA: provenance-bound human annotations and reproducible safe calculations over immutable evidence. Delta: two generic extensions; sampling, judge comparison, review scope and scientific acceptance remain consumer responsibilities.
