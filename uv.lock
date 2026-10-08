@@ -46,7 +46,7 @@ wheels = [
 
 [[package]]
 name = "evidence-review"
-version = "0.5.5"
+version = "0.5.6"
 source = { editable = "." }
 dependencies = [
     { name = "pydantic" },

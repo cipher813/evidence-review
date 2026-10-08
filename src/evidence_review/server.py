@@ -14,7 +14,7 @@ import re
 from .atomic_evidence import (ATOM_EVIDENCE_SCHEMA, RENDER_MANIFEST_SCHEMA, atom_view, build_atom_manifest,
                               validate_atom_evidence)
 from .contracts import ReviewWorkload, PACKAGE_VERSION, blind_terms, blind_violations, validate_bundle
-from .source_rendering import (DERIVATIVE_SCHEMA, RenderedSourceAsset, check_derivative, render_frozen_text,
+from .source_rendering import (DERIVATIVE_SCHEMA, RenderedSourceAsset, render_frozen_text,
                                validate_render_asset)
 from .evidence import evidence_views, inventory, navigation_coverage
 from .store import Conflict, submission_matches_snapshot
@@ -348,16 +348,22 @@ def open_review(
             """Protected rendered-source routes: allowlisted ids, current bundle only, re-verified bytes."""
             kind, _, ident = self.path[len("/api/"):].partition("/")
             renders = sidecars[0]["renders"]
+
+            def proven(asset):
+                """Re-run the shared proof (hash, allowlist, line correspondence, exact targets) before serving."""
+                try:
+                    validate_render_asset(current[0], asset)
+                except ValueError as exc:
+                    self.response(500, {"error": str(exc)})
+                    return False
+                return True
+
             if kind == "source-render":
                 if not SAFE_SOURCE.match(ident) or ident not in renders:
                     self.response(404, {"error": "no rendered source with that id in this task"})
                     return
                 asset = renders[ident]
-                try:
-                    asset.verify()
-                    check_derivative(asset.derivative)
-                except ValueError as exc:
-                    self.response(500, {"error": str(exc)})
+                if not proven(asset):
                     return
                 body = {"manifest": asset.manifest.model_dump(mode="json"), "derivative": asset.derivative}
                 if len(json.dumps(body, ensure_ascii=False)) > MAX_RENDER_RESPONSE:
@@ -371,6 +377,8 @@ def open_review(
             for asset in renders.values():
                 target = next((t for t in asset.manifest.targets if t.target_id == ident), None)
                 if target is not None:
+                    if not proven(asset):
+                        return
                     self.response(200, {"target": target.model_dump(mode="json"),
                                         "derivative_sha256": asset.manifest.derivative_sha256})
                     return

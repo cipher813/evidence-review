@@ -1832,15 +1832,93 @@ const NOTE_TEXT = /^\s*(?:\*|†|‡|§|¹|²|³|\(\w{1,3}\)|\[\w{1,3}\]|\d{1,2}
 function plainText(node) {
   return (node?.textContent || "").replace(/\s+/g, " ").trim();
 }
-function cellAt(row, column) {
-  // Column position counts colspans; the header cell covering that position, if any.
-  let at = 0;
-  for (const cell of row.cells) {
-    const span = Math.max(1, cell.colSpan || 1);
-    if (column >= at && column < at + span) return cell;
-    at += span;
+function tableGrid(table) {
+  // Occupied-cell grid of this table only (table.rows never includes a nested table's rows): rowSpan and
+  // colSpan are honoured across rows; a rowspan ends at its row group (thead, each tbody, tfoot), and
+  // rowSpan 0 runs to the end of that group. A malformed overlap keeps the first occupant, deterministically.
+  const rows = [...table.rows];
+  const grid = rows.map(() => []);
+  const at = new Map();
+  rows.forEach((tr, r) => {
+    let column = 0;
+    for (const cell of tr.cells) {
+      while (grid[r][column]) column += 1;
+      const colSpan = Math.max(1, cell.colSpan || 1);
+      let end = r + 1;
+      while (end < rows.length && rows[end].parentNode === tr.parentNode
+        && (cell.rowSpan === 0 || end < r + Math.max(1, cell.rowSpan || 1))) end += 1;
+      at.set(cell, { row: r, col: column, rows: end - r, cols: colSpan });
+      for (let y = r; y < end; y += 1) for (let x = column; x < column + colSpan; x += 1) grid[y][x] ||= cell;
+      column += colSpan;
+    }
+  });
+  return { rows, grid, at };
+}
+const UNAVAILABLE = "unavailable";
+function headerNames(cells) {
+  const names = cells.map(plainText);
+  return names.length && names.every(Boolean) ? names.join(" / ") : UNAVAILABLE;
+}
+function cellHeaders(cell, table, heads) {
+  // Column and row headers of one cell: explicit headers/id first, then scope, then grid position.
+  // Each is a " / "-joined name, or "unavailable" when the association is missing or ambiguous.
+  const { rows, grid, at } = tableGrid(table);
+  const pos = at.get(cell);
+  if (!pos) return { column: UNAVAILABLE, row: UNAVAILABLE };
+  const before = (a, b) => (at.get(a).row - at.get(b).row) || (at.get(a).col - at.get(b).col);
+  const explicit = (cell.dataset.headers || "").split(" ").filter(Boolean);
+  if (explicit.length) {
+    const byId = new Map();
+    for (const c of at.keys()) {
+      const id = c.dataset.cellId;
+      if (id) byId.set(id, byId.has(id) ? null : c); // A duplicated id resolves to nothing.
+    }
+    const found = explicit.map((id) => byId.get(id));
+    if (found.some((c) => !c)) return { column: UNAVAILABLE, row: UNAVAILABLE };
+    // A header whose rows overlap the cell's heads its row; one above (or below) it heads its column.
+    const overlaps = (c) => at.get(c).row < pos.row + pos.rows && pos.row < at.get(c).row + at.get(c).rows;
+    const colHeads = found.filter((c) => !overlaps(c)).sort(before);
+    const rowHeads = found.filter(overlaps).sort(before);
+    return { column: colHeads.length ? headerNames(colHeads) : UNAVAILABLE,
+      row: rowHeads.length ? headerNames(rowHeads) : UNAVAILABLE };
   }
-  return null;
+  const scope = (c) => (c.getAttribute("scope") || "").toLowerCase();
+  const isHeadRow = (r) => heads.includes(rows[r]);
+  // One header level per grid row above the cell; two different header cells at one level is ambiguous.
+  let ambiguous = false;
+  const colHeads = [];
+  for (let r = 0; r < pos.row; r += 1) {
+    const level = new Set();
+    for (let x = pos.col; x < pos.col + pos.cols; x += 1) {
+      const c = grid[r][x];
+      if (!c || c.tagName !== "TH" || /^row/.test(scope(c))) continue;
+      if (/^col/.test(scope(c)) || isHeadRow(at.get(c).row)) level.add(c);
+    }
+    if (level.size > 1) ambiguous = true;
+    level.forEach((c) => { if (!colHeads.includes(c)) colHeads.push(c); });
+  }
+  // One header level per grid column left of the cell, in the cell's own rows; rowgroup headers above
+  // in the same row group also apply.
+  const rowHeads = [];
+  let rowAmbiguous = false;
+  if (!isHeadRow(pos.row)) {
+    for (let x = 0; x < pos.col; x += 1) {
+      const level = new Set();
+      for (let y = 0; y < pos.row + pos.rows; y += 1) {
+        const c = grid[y][x];
+        if (!c || c.tagName !== "TH" || /^col/.test(scope(c)) || isHeadRow(at.get(c).row)) continue;
+        const own = y >= pos.row;
+        const group = scope(c) === "rowgroup" && rows[at.get(c).row].parentNode === rows[pos.row].parentNode;
+        if (own || group) level.add(c);
+      }
+      if (level.size > 1) rowAmbiguous = true;
+      level.forEach((c) => { if (!rowHeads.includes(c)) rowHeads.push(c); });
+    }
+  }
+  return {
+    column: ambiguous || !colHeads.length ? UNAVAILABLE : headerNames(colHeads.sort(before)),
+    row: rowAmbiguous || !rowHeads.length ? UNAVAILABLE : headerNames(rowHeads.sort(before)),
+  };
 }
 function targetContext(hit, doc) {
   // The table context a long document scrolls away from the hit: its column header (period, unit),
@@ -1853,16 +1931,18 @@ function targetContext(hit, doc) {
     if (heading && !heading.contains(hit)) parts.push(["Section", plainText(heading)]);
     return parts;
   }
-  const tr = hit.closest("tr");
-  const cell = hit.closest("td, th");
-  const heads = table.tHead ? [...table.tHead.rows] : [table.rows[0]].filter((r) => r && r !== tr);
+  // Only this table's own row and cell: a hit inside a nested table never reads the outer table's grid.
+  const tr = [hit.closest("tr")].find((r) => r && r.closest("table") === table) || null;
+  const cell = [hit.closest("td, th")].find((c) => c && c.closest("table") === table) || null;
+  const firstRow = table.rows[0];
+  const heads = table.tHead ? [...table.tHead.rows]
+    : [firstRow].filter((r) => r && r !== tr && [...r.cells].every((c) => c.tagName === "TH"));
   if (cell && tr && !heads.includes(tr)) {
-    let column = 0;
-    for (const c of tr.cells) { if (c === cell) break; column += Math.max(1, c.colSpan || 1); }
-    const names = [...new Set(heads.map((r) => plainText(cellAt(r, column))).filter(Boolean))];
-    if (names.length) parts.push(["Column", names.join(" / ")]);
-  }
-  if (tr && tr.cells[0] && tr.cells[0] !== cell && !heads.includes(tr)) parts.push(["Row", plainText(tr.cells[0])]);
+    const { column, row } = cellHeaders(cell, table, heads);
+    parts.push(["Column", column]);
+    // A row header cell is its own row label; it has no row header of its own to announce.
+    if (!(cell.tagName === "TH" && row === UNAVAILABLE)) parts.push(["Row", row]);
+  } else if (tr && !heads.includes(tr) && tr.cells[0]?.tagName === "TH") parts.push(["Row", plainText(tr.cells[0])]);
   if (table.caption) parts.push(["Caption", plainText(table.caption)]);
   else {
     const before = table.previousElementSibling;
