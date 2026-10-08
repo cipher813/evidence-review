@@ -26,7 +26,7 @@ def worksheet_bundle():
                                            operands=[Operand(name="current", value="24.6", unit="pct", period="FY2026", citation=current),
                                                      Operand(name="prior", value="22.8", unit="pct", period="FY2025", citation=prior)]))
     revenue = Claim(claim_id="revenue", text="Revenue fell 4.2%.", citations=[located(7, "1,150")])
-    return build(
+    b = build(
         [("summary", "Operating margin rose 180 bps to 24.6%. Revenue fell 4.2%.", ["margin", "revenue"])],
         [margin, revenue],
         {("summary", "180 bps"): ("derived", ["margin"]), ("summary", "24.6%"): ("cited", ["margin"]),
@@ -34,6 +34,12 @@ def worksheet_bundle():
         form=[FormField(field_id="support:revenue", label="Revenue support", options=CHOICES, subject_id="revenue"),
               FormField(field_id="report_complete", label="I reviewed the full report.", kind="boolean", require_true=True)],
     )
+    for n in b.spans:
+        if n.text == "180 bps":
+            n.calculation = margin.calculation
+        elif n.text == "24.6%":
+            n.citations = [current]
+    return b.model_validate(b.model_dump(mode="json"))
 
 
 def selection(b, line):
