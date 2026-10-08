@@ -148,9 +148,23 @@ pre,
   background: #d9edff;
 }
 .field,
-.defect {
+.defect,
+.annotation,
+.worksheet {
   border-top: 1px solid #d3dde5;
   padding: 0.6rem 0;
+}
+.annotated-text mark {
+  outline: 2px solid currentColor;
+}
+.worksheet-operand {
+  border: 1px solid #d3dde5;
+  margin: 0.4rem 0;
+}
+.worksheet-result {
+  display: block;
+  margin: 0.4rem 0;
+  font-weight: 600;
 }
 .save-error {
   color: #a31a1a;

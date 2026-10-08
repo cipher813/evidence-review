@@ -11,9 +11,11 @@ import threading
 import time
 from contextlib import contextmanager
 from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Protocol
-from .contracts import PACKAGE_VERSION, Judgment, Defect, ReviewSubmission, digest, now
+from .contracts import (MATERIAL_DISPOSITIONS, PACKAGE_VERSION, AnswerAnnotation, CalculationWorksheet, Judgment,
+                        Defect, ReviewSubmission, digest, finite_decimal, now, validate_answer_range)
 from .evidence import passage
 
 
@@ -62,12 +64,14 @@ def atomic(path, data):
 
 
 def validate_answers(bundle, answers, complete=False):
-    if set(answers) - {"judgments", "defects"}:
+    if set(answers) - {"judgments", "defects", "annotations", "worksheets"}:
         raise ValueError("unknown answer section")
+    annotations = [AnswerAnnotation.model_validate(a) for a in answers.get("annotations", [])]
     judgments = {
         k: Judgment.model_validate(v) for k, v in answers.get("judgments", {}).items()
     }
     defects = [Defect.model_validate(d) for d in answers.get("defects", [])]
+    worksheets = [CalculationWorksheet.model_validate(w) for w in answers.get("worksheets", [])]
     fields = {f.field_id: f for f in bundle.form}
     if judgments.keys() - fields.keys():
         raise ValueError("unknown form field")
@@ -136,7 +140,23 @@ def validate_answers(bundle, answers, complete=False):
             not d.category.strip() or not d.evidence_note.strip() or d.material is None
         ):
             raise ValueError("defect category, materiality and explanation required")
-    for record in [*judgments.values(), *defects]:
+    if len({a.annotation_id for a in annotations}) != len(annotations):
+        raise ValueError("duplicate annotation identity")
+    for a in annotations:
+        validate_answer_range(bundle, a.answer_range)
+        if complete and a.disposition is None:
+            raise ValueError(f"annotation disposition required: {a.annotation_id}")
+        if complete and a.disposition != "supported" and not a.reason.strip():
+            raise ValueError(f"annotation reason required: {a.annotation_id}")
+        if complete and a.disposition in MATERIAL_DISPOSITIONS and a.material is None:
+            raise ValueError(f"annotation materiality required: {a.annotation_id}")
+    for d in defects:
+        for r in d.answer_ranges:
+            validate_answer_range(bundle, r)
+    # A worksheet may link an annotation of these same answers, never a removed one.
+    validate_worksheets(bundle, worksheets, defects, complete, annotations)
+    operands = [o for w in worksheets for o in w.operands]
+    for record in [*judgments.values(), *defects, *annotations, *operands]:
         for selection in record.selections:
             source = sources.get(selection.source_id)
             if source is None or source.sha256 != selection.source_hash:
@@ -144,10 +164,65 @@ def validate_answers(bundle, answers, complete=False):
             text = passage(source, selection.start_line, selection.end_line)["text"]
             if text != selection.excerpt:
                 raise ValueError("source selection excerpt invalid")
-    return {
+    cleaned = {
         "judgments": {k: v.model_dump(mode="json") for k, v in judgments.items()},
         "defects": [d.model_dump(mode="json") for d in defects],
     }
+    # Each optional section is omitted when empty, so answers saved before it keep their signatures.
+    if annotations:
+        cleaned["annotations"] = [a.model_dump(mode="json") for a in annotations]
+    if worksheets:
+        cleaned["worksheets"] = [w.model_dump(mode="json") for w in worksheets]
+    return cleaned
+
+
+def submitted_answers(submission):
+    """The answer sections of a stored submission, in the shape the store saves."""
+    out = {"judgments": submission.get("judgments"), "defects": submission.get("defects")}
+    for section in ("annotations", "worksheets"):
+        if submission.get(section):
+            out[section] = submission[section]
+    return out
+
+
+def subject_ids(bundle, defects, annotations=()):
+    """Identifiers each worksheet subject kind may name in these answers."""
+    return {
+        "claim": {c.claim_id for c in bundle.claims},
+        "reference": {r.reference_id for r in bundle.references},
+        "span": {n.span_id for n in bundle.spans},
+        "defect": {d.defect_id for d in defects},
+        # Answer annotations carry a stable ``annotation_id``; none exist without that section.
+        "annotation": {a["annotation_id"] if isinstance(a, dict) else a.annotation_id for a in annotations},
+    }
+
+
+def validate_worksheets(bundle, worksheets, defects, complete, annotations=()):
+    """Subject links always; a complete submission also needs every worksheet whole."""
+    if len({w.worksheet_id for w in worksheets}) != len(worksheets):
+        raise ValueError("duplicate worksheet identity")
+    known = subject_ids(bundle, defects, annotations)
+    for w in worksheets:
+        if w.subject and w.subject.id not in known[w.subject.kind]:
+            raise ValueError(f"unknown worksheet subject: {w.subject.kind} {w.subject.id}")
+        if not complete:
+            continue
+        label = "worksheet " + w.worksheet_id
+        if w.subject is None:
+            raise ValueError(f"{label}: subject required")
+        if w.computation["status"] == "invalid":
+            raise ValueError(f"{label}: {w.computation['reason']}")
+        if finite_decimal(w.reported_value, "reported value") is False:
+            raise ValueError(f"{label}: reported value is not a decimal number")
+        for o in w.operands:
+            if o.availability == "unavailable" and not o.unavailable_reason.strip():
+                raise ValueError(f"{label}: reason required for unavailable operand {o.name}")
+            if o.availability == "selected" and (finite_decimal(o.value, o.name) is not True or not o.selections):
+                raise ValueError(f"{label}: operand {o.name} needs a decimal value and a source passage, or is unavailable")
+        if finite_decimal(w.tolerance, "tolerance") is not True or Decimal(w.tolerance) < 0:
+            raise ValueError(f"{label}: tolerance must be a non-negative decimal")
+        if not w.rationale.strip():
+            raise ValueError(f"{label}: rationale required")
 
 
 def submission_matches_snapshot(state):
@@ -156,7 +231,7 @@ def submission_matches_snapshot(state):
     return bool(prior and prior.get("complete") is True
                 and prior.get("bundle_hash") == state.get("bundle_hash")
                 and prior.get("assessor") == state.get("assessor")
-                and {"judgments": prior.get("judgments"), "defects": prior.get("defects")} == state.get("answers"))
+                and submitted_answers(prior) == state.get("answers"))
 
 
 class FileStore:

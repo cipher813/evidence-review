@@ -1,5 +1,221 @@
 {
   "$defs": {
+    "AnswerAnnotation": {
+      "additionalProperties": false,
+      "description": "A reviewer's finding about one selected answer passage (answer-annotation/v1).\n\nAnnotations record only what the reviewer chose to annotate; they never claim\nthe answer was reviewed exhaustively, and an unannotated passage is not\nthereby supported. An omission has no answer range and is recorded as a\n``Defect`` without ``answer_ranges``. ``annotation_id`` is the stable handle\nother records (e.g. a reviewer worksheet) use to link to this annotation.",
+      "properties": {
+        "contract": {
+          "const": "answer-annotation/v1",
+          "default": "answer-annotation/v1",
+          "title": "Contract",
+          "type": "string"
+        },
+        "annotation_id": {
+          "pattern": "^ann:[A-Za-z0-9_-]{1,64}$",
+          "title": "Annotation Id",
+          "type": "string"
+        },
+        "answer_range": {
+          "$ref": "#/$defs/AnswerRange"
+        },
+        "disposition": {
+          "anyOf": [
+            {
+              "enum": [
+                "supported",
+                "defective",
+                "cannot_verify",
+                "incomplete"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disposition"
+        },
+        "reason": {
+          "default": "",
+          "title": "Reason",
+          "type": "string"
+        },
+        "material": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Material"
+        },
+        "selections": {
+          "items": {
+            "$ref": "#/$defs/Selection"
+          },
+          "title": "Selections",
+          "type": "array"
+        }
+      },
+      "required": [
+        "annotation_id",
+        "answer_range"
+      ],
+      "title": "AnswerAnnotation",
+      "type": "object"
+    },
+    "AnswerRange": {
+      "additionalProperties": false,
+      "description": "Exact reviewer-selected text in one original answer field (answer-annotation/v1).\n\n``start``/``end`` are half-open code-point offsets into the field's exact text;\nthe field and document digests make a range recorded against other text stale.",
+      "properties": {
+        "contract": {
+          "const": "answer-annotation/v1",
+          "default": "answer-annotation/v1",
+          "title": "Contract",
+          "type": "string"
+        },
+        "field_path": {
+          "minLength": 1,
+          "title": "Field Path",
+          "type": "string"
+        },
+        "start": {
+          "minimum": 0,
+          "title": "Start",
+          "type": "integer"
+        },
+        "end": {
+          "exclusiveMinimum": 0,
+          "title": "End",
+          "type": "integer"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "offset_unit": {
+          "const": "code_point",
+          "default": "code_point",
+          "title": "Offset Unit",
+          "type": "string"
+        },
+        "field_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Field Sha256",
+          "type": "string"
+        },
+        "documents_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Documents Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "field_path",
+        "start",
+        "end",
+        "text",
+        "field_sha256",
+        "documents_sha256"
+      ],
+      "title": "AnswerRange",
+      "type": "object"
+    },
+    "CalculationWorksheet": {
+      "additionalProperties": false,
+      "description": "A reviewer-authored calculation, kept apart from candidate and prepared ones.\n\nIt never replaces a bundle formula. ``computation`` is derived on every\nvalidation with the package's bounded Decimal evaluator, so a client cannot\nsupply its own result; arithmetic never sets ``reviewer_support``.",
+      "properties": {
+        "worksheet_id": {
+          "pattern": "^[A-Za-z0-9_.:-]{1,120}$",
+          "title": "Worksheet Id",
+          "type": "string"
+        },
+        "contract": {
+          "const": "reviewer-calculation-worksheet/v1",
+          "default": "reviewer-calculation-worksheet/v1",
+          "title": "Contract",
+          "type": "string"
+        },
+        "authorship": {
+          "const": "reviewer",
+          "default": "reviewer",
+          "title": "Authorship",
+          "type": "string"
+        },
+        "subject": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SubjectRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "formula": {
+          "default": "",
+          "maxLength": 1000,
+          "title": "Formula",
+          "type": "string"
+        },
+        "operands": {
+          "items": {
+            "$ref": "#/$defs/WorksheetOperand"
+          },
+          "maxItems": 50,
+          "title": "Operands",
+          "type": "array"
+        },
+        "reported_value": {
+          "default": "",
+          "maxLength": 200,
+          "title": "Reported Value",
+          "type": "string"
+        },
+        "unit": {
+          "default": "",
+          "title": "Unit",
+          "type": "string"
+        },
+        "tolerance": {
+          "default": "0",
+          "maxLength": 200,
+          "title": "Tolerance",
+          "type": "string"
+        },
+        "rationale": {
+          "default": "",
+          "title": "Rationale",
+          "type": "string"
+        },
+        "reviewer_support": {
+          "default": "unknown",
+          "enum": [
+            "unknown",
+            "supported",
+            "unsupported"
+          ],
+          "title": "Reviewer Support",
+          "type": "string"
+        },
+        "computation": {
+          "additionalProperties": true,
+          "title": "Computation",
+          "type": "object"
+        }
+      },
+      "required": [
+        "worksheet_id"
+      ],
+      "title": "CalculationWorksheet",
+      "type": "object"
+    },
     "Defect": {
       "additionalProperties": false,
       "properties": {
@@ -46,6 +262,13 @@
             "$ref": "#/$defs/Selection"
           },
           "title": "Selections",
+          "type": "array"
+        },
+        "answer_ranges": {
+          "items": {
+            "$ref": "#/$defs/AnswerRange"
+          },
+          "title": "Answer Ranges",
           "type": "array"
         }
       },
@@ -142,6 +365,98 @@
       ],
       "title": "Selection",
       "type": "object"
+    },
+    "SubjectRef": {
+      "additionalProperties": false,
+      "description": "What a reviewer record is about: a bundle claim, reference or numeric span,\na defect in the same answers, or an answer annotation (by ``annotation_id``).",
+      "properties": {
+        "kind": {
+          "enum": [
+            "claim",
+            "reference",
+            "span",
+            "defect",
+            "annotation"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "title": "SubjectRef",
+      "type": "object"
+    },
+    "WorksheetOperand": {
+      "additionalProperties": false,
+      "description": "One reviewer-entered input. ``selected`` inputs carry their source passages;\n``unavailable`` inputs carry no value and say why (retained, never filled in).",
+      "properties": {
+        "name": {
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$",
+          "title": "Name",
+          "type": "string"
+        },
+        "value": {
+          "default": "",
+          "maxLength": 200,
+          "title": "Value",
+          "type": "string"
+        },
+        "unit": {
+          "default": "",
+          "title": "Unit",
+          "type": "string"
+        },
+        "period": {
+          "default": "",
+          "title": "Period",
+          "type": "string"
+        },
+        "entity": {
+          "default": "",
+          "title": "Entity",
+          "type": "string"
+        },
+        "metric": {
+          "default": "",
+          "title": "Metric",
+          "type": "string"
+        },
+        "availability": {
+          "default": "selected",
+          "enum": [
+            "selected",
+            "unavailable"
+          ],
+          "title": "Availability",
+          "type": "string"
+        },
+        "unavailable_reason": {
+          "default": "",
+          "title": "Unavailable Reason",
+          "type": "string"
+        },
+        "selections": {
+          "items": {
+            "$ref": "#/$defs/Selection"
+          },
+          "title": "Selections",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "WorksheetOperand",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -202,6 +517,13 @@
       "title": "Defects",
       "type": "array"
     },
+    "worksheets": {
+      "items": {
+        "$ref": "#/$defs/CalculationWorksheet"
+      },
+      "title": "Worksheets",
+      "type": "array"
+    },
     "complete": {
       "const": true,
       "title": "Complete",
@@ -218,6 +540,13 @@
       },
       "title": "Provenance",
       "type": "object"
+    },
+    "annotations": {
+      "items": {
+        "$ref": "#/$defs/AnswerAnnotation"
+      },
+      "title": "Annotations",
+      "type": "array"
     }
   },
   "required": [

@@ -29,6 +29,7 @@ let bundle,
   answers,
   queue = Promise.resolve(),
   selection = null,
+  answerSelection = null,
   subject = null,
   current = null,
   revealedFields = new Set(),
@@ -114,7 +115,8 @@ async function api(path, body, signal) {
 function matchesSubmitted(candidate, assessor) {
   const prior = state.submissions?.[String(state.last_submission)];
   return prior && prior.complete && prior.bundle_hash === state.bundle_hash && prior.assessor === assessor
-    && !differences(candidate, { judgments: prior.judgments, defects: prior.defects }).length;
+    && !differences(candidate, { judgments: prior.judgments, defects: prior.defects,
+      annotations: prior.annotations, worksheets: prior.worksheets }).length;
 }
 function requiredFieldsOnly() {
   return evidence.presentation?.required_fields_only === true;
@@ -142,6 +144,7 @@ function status() {
     : "Continuation not started · nothing submitted yet";
   $("next").disabled =
     !matchesSubmitted(answers, $("assessor").value.trim()) || hook.status !== "succeeded";
+  showWorksheetResults();
 }
 function logEvent(kind, subject = "") {
   // Navigation is recorded as exposure only; it never marks evidence verified.
@@ -174,6 +177,11 @@ function differences(mine, saved) {
     }
   if (JSON.stringify(canonical(mine.defects)) !== JSON.stringify(canonical(saved.defects)))
     out.push("Defects");
+  // Saved records omit an empty annotation list; absence and [] are the same answer.
+  if (JSON.stringify(canonical(mine.annotations || [])) !== JSON.stringify(canonical(saved.annotations || [])))
+    out.push("Answer annotations");
+  if (JSON.stringify(worksheetInputs(mine)) !== JSON.stringify(worksheetInputs(saved)))
+    out.push("Calculation worksheets");
   return out;
 }
 async function showConflict(message) {
@@ -500,6 +508,13 @@ function showSubject(item, id, follow = true) {
     $("evidence").append(
       el("p", "No cited evidence; search the frozen sources."),
     );
+  if (id) {
+    // Starts from a copy of any supplied formula; the supplied calculation is never edited.
+    const worksheet = el("button", "Start a reviewer worksheet for this item");
+    const kind = bundle.claims.some((c) => c.claim_id === id) ? "claim" : "reference";
+    worksheet.onclick = () => addWorksheet({ kind, id }, item.calculation);
+    $("evidence").append(worksheet);
+  }
   authorDeclarations(id ? [id] : [], $("evidence"));
 }
 // The author's declared support status: shown beside the evidence, never as support or as a citation.
@@ -674,6 +689,9 @@ function showCalculation(span, anchor) {
   authorDeclarations(span.claim_ids, card);
   const preview = el("button", "Preview calculation evidence");
   preview.onclick = () => showSpan(span, false);
+  const worksheet = el("button", "Recompute in a reviewer worksheet");
+  worksheet.onclick = () => addWorksheet({ kind: "span", id: span.span_id }, span.calculation);
+  card.append(worksheet);
   const close = el("button", "Close calculation details"); close.onclick = () => { card.remove(); anchor.focus(); };
   card.append(preview, close); anchor.after(card);
   logEvent("span_opened", span.span_id);
@@ -700,7 +718,7 @@ function numberAction(s, verificationControls = true) {
   if (verification) fragment.className = "quantity-token";
   fragment.append(b);
   if (verification) {
-    const label = el("label"); label.className = "quantity-check";
+    const label = el("label"); label.className = "quantity-check"; label.dataset.notAnswer = "";
     const check = el("input"); check.type = "checkbox";
     check.dataset.quantityField = verification.field_id;
     check.checked = answers.judgments[verification.field_id]?.value === true;
@@ -716,7 +734,7 @@ function numberAction(s, verificationControls = true) {
     label.append(check); fragment.prepend(label);
   }
   if (direct) {
-    const preview = el("button", "Preview evidence"); preview.className = "preview-link";
+    const preview = el("button", "Preview evidence"); preview.className = "preview-link"; preview.dataset.notAnswer = "";
     preview.setAttribute("aria-label", "Preview evidence for " + s.text);
     preview.onclick = () => showSpan(s, false); fragment.append(preview);
   }
@@ -726,6 +744,7 @@ function linkedStatement(text, subjectId, verificationControls = !atomicMode()) 
   const wrap = el("blockquote"); wrap.className = "item-text";
   const field = bundle.fields.find((f) => f.role !== "context" && f.text === text && f.claim_ids.includes(subjectId));
   if (!field) { wrap.textContent = text; return wrap; }
+  wrap.dataset.fieldPath = field.path;
   let at = 0; const chars = Array.from(text);
   bundle.spans.filter((s) => s.field_path === field.path).sort((a,b) => a.start-b.start).forEach((s) => {
     // Atomic mode owns each atom's one check control in its row; statement context here is read-only.
@@ -909,6 +928,7 @@ function renderReport() {
     });
     p.append(document.createTextNode(chars.slice(offset).join("")));
     p.dataset.savedText = f.text;
+    p.dataset.fieldPath = f.path;
     p.dataset.claimIds = JSON.stringify(f.claim_ids || []);
     report.append(p);
   });
@@ -1308,15 +1328,499 @@ function renderDefects() {
         el("p", `${s.source_id} L${s.start_line}–L${s.end_line}: ${s.excerpt}`),
       ),
     );
+    const answerAttach = el("button", "Attach selected answer text to defect");
+    answerAttach.onclick = () => {
+      if (!answerSelection) {
+        $("status").textContent = "Select exact text in an answer field first.";
+        return;
+      }
+      d.answer_ranges = [...(d.answer_ranges || []), structuredClone(answerSelection)];
+      renderDefects();
+      save();
+    };
+    div.append(answerAttach);
+    if (!(d.answer_ranges || []).length)
+      div.append(el("small", "No answer passage attached: this records an omission or a whole-answer defect."));
+    (d.answer_ranges || []).forEach((r, k) => {
+      div.append(rangeInContext(r));
+      const drop = el("button", "Remove answer text");
+      drop.onclick = () => {
+        d.answer_ranges.splice(k, 1);
+        // An empty list is the legacy shape; never store it.
+        if (!d.answer_ranges.length) delete d.answer_ranges;
+        renderDefects();
+        save();
+      };
+      div.append(drop);
+    });
     const remove = el("button", "Remove defect");
     remove.onclick = () => {
       answers.defects.splice(i, 1);
+      // A worksheet about this defect keeps its calculation and loses only the link.
+      (answers.worksheets || []).forEach((w) => {
+        if (w.subject?.kind === "defect" && w.subject.id === d.defect_id) w.subject = null;
+      });
       renderDefects();
       save();
     };
     div.append(remove);
     $("defects").append(div);
   });
+  renderWorksheets();
+}
+// ---- Reviewer-authored calculation worksheets (reviewer-calculation-worksheet/v1).
+// Separate from candidate and prepared calculations: a worksheet never edits a
+// supplied formula, and its server-derived arithmetic never decides support.
+function worksheetInputs(a) {
+  return canonical((a?.worksheets || []).map(({ computation, ...inputs }) => inputs));
+}
+function newWorksheetOperand(name, from = {}) {
+  return { name, value: from.value || "", unit: from.unit || "", period: from.period || "",
+    entity: from.entity || "", metric: from.metric || "", availability: "selected",
+    unavailable_reason: "", selections: [] };
+}
+function newWorksheet(subjectRef, from = null) {
+  return { worksheet_id: "W" + crypto.randomUUID(), contract: "reviewer-calculation-worksheet/v1",
+    authorship: "reviewer", subject: subjectRef, formula: from?.formula || "",
+    operands: (from?.operands || []).filter((o) => o.kind !== "constant").map((o) => newWorksheetOperand(o.name, o)),
+    reported_value: from?.result || "", unit: from?.unit || "", tolerance: from?.tolerance || "0",
+    rationale: "", reviewer_support: "unknown" };
+}
+function addWorksheet(subjectRef, from = null) {
+  (answers.worksheets ||= []).push(newWorksheet(subjectRef, from));
+  renderWorksheets();
+  save();
+  const all = document.querySelectorAll("#worksheets .worksheet");
+  all[all.length - 1]?.querySelector("input")?.focus();
+}
+function worksheetSubjects() {
+  const out = [];
+  bundle.claims.forEach((c) => out.push({ kind: "claim", id: c.claim_id, label: `Claim ${c.claim_id}: ${short(c.text, 60)}` }));
+  bundle.references.forEach((r) => out.push({ kind: "reference", id: r.reference_id, label: `Reference ${r.reference_id}: ${short(r.text, 60)}` }));
+  bundle.spans.filter((n) => n.state !== "identifier").forEach((n) =>
+    out.push({ kind: "span", id: n.span_id, label: `Number ${n.text} (${n.field_path})` }));
+  answers.defects.forEach((d, i) => out.push({ kind: "defect", id: d.defect_id, label: `Defect ${i + 1}${d.category ? ": " + d.category : ""}` }));
+  (answers.annotations || []).forEach((a, i) => out.push({ kind: "annotation", id: a.annotation_id,
+    label: `Annotation ${i + 1}: “${short(a.answer_range.text, 50)}”` }));
+  return out;
+}
+function suppliedCalculation(ref) {
+  if (!ref) return null;
+  if (ref.kind === "claim") return bundle.claims.find((c) => c.claim_id === ref.id)?.calculation || null;
+  if (ref.kind === "reference") return bundle.references.find((r) => r.reference_id === ref.id)?.calculation || null;
+  if (ref.kind === "span") return bundle.spans.find((n) => n.span_id === ref.id)?.calculation || null;
+  return null;
+}
+function worksheetText(w, label, key, box, aria = label) {
+  const l = el("label", label + " ");
+  const input = el("input");
+  input.setAttribute("aria-label", aria);
+  input.value = w[key];
+  input.oninput = () => { w[key] = input.value; showWorksheetResults(); save(); };
+  l.append(input); box.append(l);
+  return input;
+}
+function renderWorksheets() {
+  const box = $("worksheets");
+  if (!box) return;
+  box.replaceChildren();
+  (answers.worksheets || []).forEach((w, i) => {
+    const n = i + 1, div = el("div");
+    div.className = "worksheet";
+    div.dataset.worksheet = w.worksheet_id;
+    div.setAttribute("role", "group");
+    div.setAttribute("aria-label", `Worksheet ${n}`);
+    div.append(el("h4", `Worksheet ${n} · reviewer-authored calculation`));
+    const subjectLabel = el("label", "About ");
+    const pick = el("select");
+    pick.setAttribute("aria-label", `Worksheet ${n} subject`);
+    pick.append(new Option("Choose what this calculation checks…", ""));
+    const choices = worksheetSubjects();
+    if (w.subject && !choices.some((c) => c.kind === w.subject.kind && c.id === w.subject.id))
+      choices.push({ ...w.subject, label: `${w.subject.kind} ${w.subject.id}` });
+    choices.forEach((c) => pick.append(new Option(c.label, c.kind + "\u0000" + c.id)));
+    pick.value = w.subject ? w.subject.kind + "\u0000" + w.subject.id : "";
+    pick.onchange = () => {
+      const [kind, id] = pick.value.split("\u0000");
+      w.subject = pick.value ? { kind, id } : null;
+      renderWorksheets(); save();
+    };
+    subjectLabel.append(pick); div.append(subjectLabel);
+    const supplied = suppliedCalculation(w.subject);
+    div.append(el("p", supplied
+      ? `Supplied formula (candidate, unchanged): ${supplied.formula} → reported ${supplied.result} ${supplied.unit}`.trim()
+      : "No supplied formula for this subject."));
+    worksheetText(w, "Formula", "formula", div, `Worksheet ${n} formula`);
+    div.append(el("small", "Use operand names, numbers, + − × ÷ (as + - * /) and parentheses."));
+    w.operands.forEach((o, j) => {
+      const row = el("fieldset");
+      row.className = "worksheet-operand";
+      const legend = el("legend", `Operand ${o.name || j + 1}`);
+      row.append(legend);
+      for (const [key, label] of [["name", "name"], ["value", "value"], ["unit", "unit"], ["period", "period"],
+                                  ["entity", "entity"], ["metric", "metric"]]) {
+        const input = worksheetText(o, label, key, row, `Worksheet ${n} operand ${j + 1} ${label}`);
+        if (key === "name") input.addEventListener("input", () => { legend.textContent = `Operand ${o.name || j + 1}`; });
+        if (key === "value") input.disabled = o.availability === "unavailable";
+      }
+      const availability = el("select");
+      availability.setAttribute("aria-label", `Worksheet ${n} operand ${j + 1} availability`);
+      availability.append(new Option("Value from source passages", "selected"), new Option("Unavailable in the sources", "unavailable"));
+      availability.value = o.availability;
+      availability.onchange = () => {
+        o.availability = availability.value;
+        if (o.availability === "unavailable") { o.value = ""; o.selections = []; }
+        renderWorksheets(); save();
+      };
+      row.append(availability);
+      if (o.availability === "unavailable") {
+        worksheetText(o, "Why unavailable", "unavailable_reason", row, `Worksheet ${n} operand ${j + 1} unavailable reason`);
+      } else {
+        const attach = el("button", "Attach selected passage");
+        attach.type = "button";
+        attach.setAttribute("aria-label", `Attach selected passage to worksheet ${n} operand ${j + 1}`);
+        attach.onclick = () => {
+          if (!selection) { $("status").textContent = "Select source lines first, then attach them."; return; }
+          o.selections.push(structuredClone(selection));
+          renderWorksheets(); save();
+        };
+        row.append(attach);
+        o.selections.forEach((sel, k) => {
+          const p = el("p", `${sel.source_id} L${sel.start_line}–L${sel.end_line}: ${sel.excerpt}`);
+          const drop = el("button", "Remove passage");
+          drop.type = "button";
+          drop.setAttribute("aria-label", `Remove passage ${k + 1} from worksheet ${n} operand ${j + 1}`);
+          drop.onclick = () => { o.selections.splice(k, 1); renderWorksheets(); save(); };
+          p.append(drop); row.append(p);
+        });
+        if (!o.selections.length) row.append(el("p", "No source passage attached."));
+      }
+      const removeOperand = el("button", "Remove operand");
+      removeOperand.type = "button";
+      removeOperand.setAttribute("aria-label", `Remove worksheet ${n} operand ${j + 1}`);
+      removeOperand.onclick = () => { w.operands.splice(j, 1); renderWorksheets(); save(); };
+      row.append(removeOperand);
+      div.append(row);
+    });
+    const addOperand = el("button", "Add operand");
+    addOperand.type = "button";
+    addOperand.setAttribute("aria-label", `Add operand to worksheet ${n}`);
+    addOperand.onclick = () => {
+      let k = w.operands.length + 1;
+      while (w.operands.some((o) => o.name === "input" + k)) k++;
+      w.operands.push(newWorksheetOperand("input" + k));
+      renderWorksheets(); save();
+    };
+    div.append(addOperand);
+    worksheetText(w, "Reported value", "reported_value", div, `Worksheet ${n} reported value`);
+    worksheetText(w, "Unit", "unit", div, `Worksheet ${n} unit`);
+    worksheetText(w, "Absolute tolerance", "tolerance", div, `Worksheet ${n} tolerance`);
+    const result = el("output");
+    result.className = "worksheet-result";
+    result.setAttribute("aria-live", "polite");
+    result.setAttribute("aria-label", `Worksheet ${n} result`);
+    div.append(result);
+    const rationale = el("textarea");
+    rationale.setAttribute("aria-label", `Worksheet ${n} rationale`);
+    rationale.placeholder = "What this calculation checks and why these inputs";
+    rationale.value = w.rationale;
+    rationale.oninput = () => { w.rationale = rationale.value; save(); };
+    div.append(rationale);
+    const support = el("select");
+    support.setAttribute("aria-label", `Worksheet ${n} reviewer support judgment`);
+    support.append(new Option("Support: unknown (not decided by arithmetic)", "unknown"),
+      new Option("Support: supported", "supported"), new Option("Support: unsupported", "unsupported"));
+    support.value = w.reviewer_support;
+    support.onchange = () => { w.reviewer_support = support.value; save(); };
+    div.append(support);
+    const remove = el("button", "Remove worksheet");
+    remove.type = "button";
+    remove.setAttribute("aria-label", `Remove worksheet ${n}`);
+    remove.onclick = () => { answers.worksheets.splice(i, 1); renderWorksheets(); save(); };
+    div.append(remove);
+    box.append(div);
+  });
+  showWorksheetResults();
+}
+function describeComputation(c) {
+  if (!c) return "Not yet recomputed.";
+  if (c.status === "computed") {
+    const compared = c.comparison === "not_compared" ? "no reported value compared"
+      : `reported value ${c.comparison} · discrepancy ${c.discrepancy}`;
+    return `Recomputed (Decimal): ${c.result} · ${compared}`;
+  }
+  return { calculation_error: "Calculation error: ", incomplete: "Incomplete: ", invalid: "Not computed: " }[c.status] + c.reason;
+}
+function showWorksheetResults() {
+  const saved = new Map((state?.answers?.worksheets || []).map((w) => [w.worksheet_id, w]));
+  document.querySelectorAll("#worksheets .worksheet").forEach((div) => {
+    const out = div.querySelector(".worksheet-result");
+    const mine = (answers.worksheets || []).find((w) => w.worksheet_id === div.dataset.worksheet);
+    const theirs = saved.get(div.dataset.worksheet);
+    const current = mine && theirs &&
+      JSON.stringify(worksheetInputs({ worksheets: [mine] })) === JSON.stringify(worksheetInputs({ worksheets: [theirs] }));
+    out.textContent = current
+      ? describeComputation(theirs.computation) + " · Reviewer arithmetic; it does not establish support."
+      : "Not recomputed yet: these inputs are not saved (see save status).";
+    out.dataset.status = current ? theirs.computation.status : "unsaved";
+  });
+}
+// ---- answer-annotation/v1: reviewer-selected exact text in an original answer field.
+// Offsets are Unicode code points (Array.from), identical to Python str indexing;
+// the store re-validates field, document digests, bounds and exact text.
+const DISPOSITIONS = [
+  ["supported", "Supported by the sources"],
+  ["defective", "Defective"],
+  ["cannot_verify", "Cannot verify"],
+  ["incomplete", "Incomplete"],
+];
+const MATERIAL_DISPOSITIONS = ["defective", "incomplete"];
+function codePoints(text) {
+  return Array.from(text).length;
+}
+// Code-point offset of a DOM boundary within one answer host, counting only the
+// answer's own text (never control labels such as "Preview evidence").
+function answerOffset(host, node, offset) {
+  const point = document.createRange();
+  point.setStart(node, offset);
+  point.collapse(true);
+  const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) => n.parentElement.closest("[data-not-answer]") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+  });
+  let count = 0;
+  for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+    if (t === node) {
+      const before = t.data.slice(0, offset);
+      if (/[\uD800-\uDBFF]$/.test(before)) return null; // never split a surrogate pair
+      return count + codePoints(before);
+    }
+    if (point.comparePoint(t, 0) >= 0) return count;
+    count += codePoints(t.data);
+  }
+  return count;
+}
+function answerHost(node) {
+  const element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+  return element?.closest("[data-field-path]") || null;
+}
+function selectedAnswerRange() {
+  const sel = document.getSelection();
+  if (!bundle || !sel || sel.isCollapsed || !sel.rangeCount) return undefined;
+  const range = sel.getRangeAt(0);
+  const host = answerHost(range.startContainer), end = answerHost(range.endContainer);
+  if (!host && !end) return undefined; // a selection elsewhere leaves the last answer selection intact
+  if (!host || host !== end) return { error: "Select text within one answer field." };
+  const field = annotatableFields().find((f) => f.path === host.dataset.fieldPath);
+  if (!field) return { error: "That text is not part of an answer under review." };
+  const start = answerOffset(host, range.startContainer, range.startOffset);
+  const stop = answerOffset(host, range.endContainer, range.endOffset);
+  if (start === null || stop === null || !(start >= 0 && start < stop && stop <= codePoints(field.text)))
+    return { error: "That selection has no exact answer text." };
+  return rangeFor(field, start, stop);
+}
+// Answer fields the server bound for annotation (never context fields).
+function annotatableFields() {
+  const binding = evidence.answer_annotation;
+  return bundle.fields.filter((f) => f.role !== "context" && binding?.fields?.[f.path]);
+}
+// The one range shape both the mouse and the keyboard path produce: code points [start, stop).
+function rangeFor(field, start, stop) {
+  const binding = evidence.answer_annotation;
+  const chars = Array.from(field.text);
+  return {
+    contract: binding.contract,
+    field_path: field.path,
+    start,
+    end: stop,
+    text: chars.slice(start, stop).join(""),
+    offset_unit: binding.offset_unit,
+    field_sha256: binding.fields[field.path],
+    documents_sha256: binding.documents_sha256,
+  };
+}
+function describeRange(r) {
+  const field = bundle.fields.find((f) => f.path === r.field_path);
+  return `${field ? field.label : r.field_path}, characters ${r.start + 1}–${r.end}`;
+}
+// Keyboard path: every exact occurrence of typed text in one answer field, as code points.
+// indexOf counts UTF-16 units; a well-formed needle only matches at a code-point boundary.
+function typedOccurrences(field, needle) {
+  const out = [];
+  if (!needle) return out;
+  for (let i = field.text.indexOf(needle); i !== -1; i = field.text.indexOf(needle, i + 1)) {
+    const start = codePoints(field.text.slice(0, i));
+    out.push([start, start + codePoints(needle)]);
+  }
+  return out;
+}
+function renderTypedOccurrences() {
+  const field = annotatableFields().find((f) => f.path === $("annotate-field").value);
+  const needle = $("annotate-text").value;
+  const pick = $("annotate-occurrence");
+  const found = field ? typedOccurrences(field, needle) : [];
+  pick.replaceChildren();
+  if (!found.length)
+    pick.append(new Option(needle ? "No exact occurrence in this field" : "Type exact text first", ""));
+  const chars = field ? Array.from(field.text) : [];
+  found.forEach(([s, e], k) => {
+    const before = chars.slice(Math.max(0, s - 20), s).join(""), after = chars.slice(e, e + 20).join("");
+    pick.append(new Option(`Occurrence ${k + 1} of ${found.length} (characters ${s + 1}–${e}): …${before}[${chars.slice(s, e).join("")}]${after}…`, `${s}:${e}`));
+  });
+}
+function renderTypedAnnotation() {
+  const fields = annotatableFields();
+  $("annotate-typed").hidden = !fields.length;
+  const pick = $("annotate-field"), keep = pick.value;
+  pick.replaceChildren(...fields.map((f) => new Option(f.label || f.path, f.path)));
+  if (fields.some((f) => f.path === keep)) pick.value = keep;
+  renderTypedOccurrences();
+}
+$("annotate-field").onchange = renderTypedOccurrences;
+$("annotate-text").oninput = renderTypedOccurrences;
+$("use-typed-text").onclick = () => {
+  const field = annotatableFields().find((f) => f.path === $("annotate-field").value);
+  const chosen = $("annotate-occurrence").value;
+  const box = $("answer-selection");
+  if (!field || !chosen) {
+    answerSelection = null;
+    box.textContent = "No occurrence chosen: type text that occurs exactly in the chosen answer field.";
+    return;
+  }
+  const [start, stop] = chosen.split(":").map(Number);
+  answerSelection = rangeFor(field, start, stop);
+  box.textContent = `Selected answer text (${describeRange(answerSelection)}): “${short(answerSelection.text, 120)}”`;
+};
+document.addEventListener("selectionchange", () => {
+  const picked = selectedAnswerRange();
+  if (picked === undefined) return;
+  const box = $("answer-selection");
+  if (picked.error) {
+    answerSelection = null;
+    box.textContent = picked.error;
+    return;
+  }
+  answerSelection = picked;
+  box.textContent = `Selected answer text (${describeRange(picked)}): “${short(picked.text, 120)}”`;
+});
+// The chosen occurrence in its surroundings, so repeated words are distinguishable.
+function rangeInContext(r) {
+  const field = bundle.fields.find((f) => f.path === r.field_path);
+  const chars = Array.from(field ? field.text : r.text);
+  const quote = el("blockquote");
+  quote.className = "annotated-text";
+  const lead = Math.max(0, r.start - 40), tail = Math.min(chars.length, r.end + 40);
+  const mark = el("mark", r.text);
+  quote.append((lead ? "…" : "") + chars.slice(lead, r.start).join(""), mark,
+    chars.slice(r.end, tail).join("") + (tail < chars.length ? "…" : ""));
+  quote.setAttribute("aria-label", "Annotated answer text: " + describeRange(r));
+  return quote;
+}
+function renderAnnotations() {
+  const list = $("annotations");
+  list.replaceChildren();
+  answers.annotations.forEach((a, i) => {
+    const div = el("div");
+    div.className = "annotation";
+    div.dataset.annotationId = a.annotation_id;
+    div.append(el("h4", `Annotation ${i + 1} · ${describeRange(a.answer_range)}`), rangeInContext(a.answer_range));
+    const disposition = el("select");
+    disposition.setAttribute("aria-label", "Annotation disposition");
+    disposition.append(new Option("Choose disposition…", ""));
+    DISPOSITIONS.forEach(([value, label]) => disposition.append(new Option(label, value)));
+    disposition.value = a.disposition || "";
+    const material = el("select");
+    material.setAttribute("aria-label", "Annotation materiality");
+    material.append(new Option("Choose materiality…", ""), new Option("Nonmaterial", "false"), new Option("Material", "true"));
+    material.value = a.material === null ? "" : String(a.material);
+    const applicable = () => { material.hidden = !MATERIAL_DISPOSITIONS.includes(a.disposition); };
+    disposition.onchange = () => {
+      a.disposition = disposition.value || null;
+      // Materiality is recorded only where a problem is reported.
+      if (!MATERIAL_DISPOSITIONS.includes(a.disposition)) { a.material = null; material.value = ""; }
+      applicable();
+      save();
+    };
+    material.onchange = () => {
+      a.material = material.value === "" ? null : material.value === "true";
+      save();
+    };
+    applicable();
+    const reason = el("textarea");
+    reason.setAttribute("aria-label", "Annotation reason");
+    reason.placeholder = "Reason (required unless supported)";
+    reason.value = a.reason;
+    reason.oninput = () => { a.reason = reason.value; save(); };
+    div.append(disposition, material, reason);
+    const attach = el("button", "Attach selected source passage to annotation");
+    attach.onclick = () => {
+      if (!selection) {
+        $("status").textContent = "Select a passage first: open a source and click its first and last line.";
+        return;
+      }
+      a.selections.push(structuredClone(selection));
+      renderAnnotations();
+      save();
+    };
+    div.append(attach);
+    a.selections.forEach((s, k) => {
+      const line = el("p", `${s.source_id} L${s.start_line}–L${s.end_line}: ${s.excerpt}`);
+      const remove = el("button", "Remove passage");
+      remove.onclick = () => { a.selections.splice(k, 1); renderAnnotations(); save(); };
+      line.append(remove);
+      div.append(line);
+    });
+    const start = el("button", "Start calculation worksheet");
+    start.type = "button";
+    start.setAttribute("aria-label", `Start calculation worksheet from annotation ${i + 1}`);
+    start.onclick = () => addWorksheet({ kind: "annotation", id: a.annotation_id });
+    div.append(start);
+    const refused = el("p");
+    refused.className = "save-error";
+    refused.setAttribute("role", "alert");
+    refused.hidden = true;
+    const remove = el("button", "Remove annotation");
+    remove.onclick = () => {
+      // A worksheet's subject must exist in the same answers (the store refuses a dangling
+      // link on save and submit alike), so a linked annotation is never removed silently.
+      const linked = annotationWorksheets(a.annotation_id);
+      if (linked.length) {
+        refused.hidden = false;
+        refused.textContent = `Not removed: ${linked.map((n) => "worksheet " + n).join(", ")} ` +
+          `${linked.length > 1 ? "are" : "is"} about this annotation. Change that worksheet's subject or remove it first.`;
+        return;
+      }
+      answers.annotations.splice(i, 1);
+      renderAnnotations();
+      renderWorksheets();
+      save();
+    };
+    div.append(remove, refused);
+    list.append(div);
+  });
+}
+// 1-based numbers of the worksheets whose subject is this annotation.
+function annotationWorksheets(id) {
+  return (answers.worksheets || []).flatMap((w, n) =>
+    w.subject?.kind === "annotation" && w.subject.id === id ? [n + 1] : []);
+}
+function annotateSelection() {
+  if (!answerSelection) {
+    $("status").textContent = "Select exact text in an answer field first.";
+    return;
+  }
+  answers.annotations.push({
+    contract: answerSelection.contract,
+    annotation_id: "ann:" + crypto.randomUUID(),
+    answer_range: structuredClone(answerSelection),
+    disposition: null,
+    reason: "",
+    material: null,
+    selections: [],
+  });
+  renderAnnotations();
+  renderWorksheets();
+  save();
+  $("annotations").lastElementChild?.querySelector("select")?.focus();
 }
 function render() {
   $("review-type").textContent = {
@@ -1381,6 +1885,8 @@ function render() {
   if (bundle.task_kind === "reference") referenceEvidenceList(first?.subject_id);
   $("evidence-panel").open = true;
   renderDefects();
+  renderAnnotations();
+  renderTypedAnnotation();
   $("subjects").replaceChildren();
   [...bundle.claims, ...bundle.references].forEach((c) => {
     const b = el("button", c.text);
@@ -1409,6 +1915,10 @@ async function load() {
   conflicted = false;
   $("conflict").hidden = true;
   answers = structuredClone(state.answers);
+  answers.annotations ||= [];
+  answerSelection = null;
+  $("answer-selection").textContent = "No answer text selected.";
+  answers.worksheets ||= [];
   revealedFields.clear();
   $("assessor").value =
     state.assessor ||
@@ -1439,6 +1949,11 @@ $("add-defect").onclick = () => {
   });
   renderDefects();
   save();
+};
+$("add-annotation").onclick = annotateSelection;
+$("add-worksheet").onclick = () => {
+  const claim = subject && bundle.claims.some((c) => c.claim_id === subject) ? { kind: "claim", id: subject } : null;
+  addWorksheet(claim);
 };
 $("submit").onclick = () => save(true).catch(() => {});
 $("reconcile").onclick = () => {
@@ -1507,8 +2022,10 @@ document.addEventListener("keydown", (event) => {
       event.preventDefault();
       goTo(target.field_id);
     }
-  } else if (event.key === "Escape" && selection) {
+  } else if (event.key === "Escape" && (selection || answerSelection)) {
     selection = null;
+    answerSelection = null;
+    $("answer-selection").textContent = "No answer text selected.";
     $("status").textContent = "Passage selection cleared.";
   }
 });
@@ -1584,7 +2101,7 @@ function renderAtomicStatements() {
   const rows = evidence.atoms.rows;
   bundle.fields.filter((f) => f.role !== "context").forEach((f) => {
     report.append(el("h3", f.label));
-    const p = el("div"); p.className = "report-text"; p.dataset.savedText = f.text;
+    const p = el("div"); p.className = "report-text"; p.dataset.savedText = f.text; p.dataset.fieldPath = f.path;
     const chars = Array.from(f.text);
     let at = 0;
     rows.filter((r) => r.field_path === f.path).sort((a, b) => a.start - b.start).forEach((r) => {
