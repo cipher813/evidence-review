@@ -1400,6 +1400,8 @@ function worksheetSubjects() {
   bundle.spans.filter((n) => n.state !== "identifier").forEach((n) =>
     out.push({ kind: "span", id: n.span_id, label: `Number ${n.text} (${n.field_path})` }));
   answers.defects.forEach((d, i) => out.push({ kind: "defect", id: d.defect_id, label: `Defect ${i + 1}${d.category ? ": " + d.category : ""}` }));
+  (answers.annotations || []).forEach((a, i) => out.push({ kind: "annotation", id: a.annotation_id,
+    label: `Annotation ${i + 1}: “${short(a.answer_range.text, 50)}”` }));
   return out;
 }
 function suppliedCalculation(ref) {
@@ -1710,11 +1712,39 @@ function renderAnnotations() {
       line.append(remove);
       div.append(line);
     });
+    const start = el("button", "Start calculation worksheet");
+    start.type = "button";
+    start.setAttribute("aria-label", `Start calculation worksheet from annotation ${i + 1}`);
+    start.onclick = () => addWorksheet({ kind: "annotation", id: a.annotation_id });
+    div.append(start);
+    const refused = el("p");
+    refused.className = "save-error";
+    refused.setAttribute("role", "alert");
+    refused.hidden = true;
     const remove = el("button", "Remove annotation");
-    remove.onclick = () => { answers.annotations.splice(i, 1); renderAnnotations(); save(); };
-    div.append(remove);
+    remove.onclick = () => {
+      // A worksheet's subject must exist in the same answers (the store refuses a dangling
+      // link on save and submit alike), so a linked annotation is never removed silently.
+      const linked = annotationWorksheets(a.annotation_id);
+      if (linked.length) {
+        refused.hidden = false;
+        refused.textContent = `Not removed: ${linked.map((n) => "worksheet " + n).join(", ")} ` +
+          `${linked.length > 1 ? "are" : "is"} about this annotation. Change that worksheet's subject or remove it first.`;
+        return;
+      }
+      answers.annotations.splice(i, 1);
+      renderAnnotations();
+      renderWorksheets();
+      save();
+    };
+    div.append(remove, refused);
     list.append(div);
   });
+}
+// 1-based numbers of the worksheets whose subject is this annotation.
+function annotationWorksheets(id) {
+  return (answers.worksheets || []).flatMap((w, n) =>
+    w.subject?.kind === "annotation" && w.subject.id === id ? [n + 1] : []);
 }
 function annotateSelection() {
   if (!answerSelection) {
@@ -1731,6 +1761,7 @@ function annotateSelection() {
     selections: [],
   });
   renderAnnotations();
+  renderWorksheets();
   save();
   $("annotations").lastElementChild?.querySelector("select")?.focus();
 }

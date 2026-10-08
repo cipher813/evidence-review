@@ -153,7 +153,8 @@ def validate_answers(bundle, answers, complete=False):
     for d in defects:
         for r in d.answer_ranges:
             validate_answer_range(bundle, r)
-    validate_worksheets(bundle, worksheets, defects, complete)
+    # A worksheet may link an annotation of these same answers, never a removed one.
+    validate_worksheets(bundle, worksheets, defects, complete, annotations)
     operands = [o for w in worksheets for o in w.operands]
     for record in [*judgments.values(), *defects, *annotations, *operands]:
         for selection in record.selections:
