@@ -65,6 +65,14 @@ def build_manifest(root, verification, coverage, tests_passed, source_tree):
             "memory, navigation, check, save and submit work, reload without a token shows safe recovery (Chromium)",
             "occurrence-bound partial prepared inputs (direct and nested) shown and navigable in atomic rows beside "
             "the original inputs, which keep their own unresolved status, never checking a row (synthetic, Chromium)",
+            "one click on an 80-row table keeps the column header, status and a verbatim cited-cell context (column, "
+            "row label, units, caption, footnote) in the viewport with the highlighted cell (Chromium, 1400x900)",
+            "caller render manifests refused unless every exact target is the derivative's own proven mapping "
+            "(missing node, unrelated node, same text in another row, wrong PDF page or box, absent page)",
+            "a missing exact node in a served rendering is shown as unavailable, never as an exact highlight (Chromium)",
+            "distinct accessible names for each atom row's expansion control, checkbox and source link (Chromium)",
+            "allowlisted local HTML styling kept via CSSOM under the unchanged CSP; header scope inferred only where "
+            "table structure proves it (synthetic, Chromium)",
         ],
         "unverified": [
             "human usability and reviewer effort (no pilot run)",

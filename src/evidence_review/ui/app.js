@@ -1697,8 +1697,12 @@ function renderAtomRows() {
     }
     row.append(head);
     const more = el("details"); more.className = "atom-expand";
-    more.append(el("summary", r.calculation || preparations.some((p) => p.calculation)
-      ? "Calculation, inputs and sources" : "Evidence details"));
+    const summaryText = r.calculation || preparations.some((p) => p.calculation)
+      ? "Calculation, inputs and sources" : "Evidence details";
+    const summary = el("summary", summaryText); summary.className = "atom-summary";
+    // Each row's expansion has its own accessible name, distinct from its checkbox and source link.
+    summary.setAttribute("aria-label", `${summaryText} for “${r.text}” (atom ${i + 1})`);
+    more.append(summary);
     more.ontoggle = () => { if (more.open) logEvent("atom_row_expanded", r.atom_id); };
     if (r.calculation && preparations.length) more.append(el("h4", "Original candidate calculation"));
     if (r.calculation) {
@@ -1764,6 +1768,8 @@ function buildNode(node, ids) {
   if (node.tag === "notice") n.className = "render-notice";
   if (node.line && node.tag !== "line") n.dataset.line = String(node.line);
   Object.entries(node.attrs || {}).forEach(([k, v]) => n.setAttribute(k, v));
+  // Allowlisted local styling, checked by the server; CSSOM, so the page CSP needs no inline styles.
+  Object.entries(node.style || {}).forEach(([k, v]) => n.style.setProperty(k, v));
   if (node.tag === "page") {
     n.className = "pdf-page"; n.dataset.page = String(node.page);
     n.setAttribute("role", "region"); n.setAttribute("aria-label", `Page ${node.page}`);
@@ -1790,6 +1796,57 @@ function markExcerpt(node, excerpt) {
     const mark = el("mark"); mark.className = "cited-words"; range.surroundContents(mark);
     return;
   }
+}
+const NOTE_TEXT = /^\s*(?:\*|†|‡|§|¹|²|³|\(\w{1,3}\)|\[\w{1,3}\]|\d{1,2}[.)]\s|(?:foot)?notes?\b|source\b|n\/?m\b)/i;
+function plainText(node) {
+  return (node?.textContent || "").replace(/\s+/g, " ").trim();
+}
+function cellAt(row, column) {
+  // Column position counts colspans; the header cell covering that position, if any.
+  let at = 0;
+  for (const cell of row.cells) {
+    const span = Math.max(1, cell.colSpan || 1);
+    if (column >= at && column < at + span) return cell;
+    at += span;
+  }
+  return null;
+}
+function targetContext(hit, doc) {
+  // The table context a long document scrolls away from the hit: its column header (period, unit),
+  // row label (entity, metric), caption, table notes and footnotes, read verbatim from the rendering.
+  const parts = [];
+  const heading = [...doc.querySelectorAll("h1, h2, h3, h4, h5, h6")]
+    .filter((h) => h.compareDocumentPosition(hit) & Node.DOCUMENT_POSITION_FOLLOWING).pop();
+  const table = hit.closest("table");
+  if (!table || !doc.contains(table)) {
+    if (heading && !heading.contains(hit)) parts.push(["Section", plainText(heading)]);
+    return parts;
+  }
+  const tr = hit.closest("tr");
+  const cell = hit.closest("td, th");
+  const heads = table.tHead ? [...table.tHead.rows] : [table.rows[0]].filter((r) => r && r !== tr);
+  if (cell && tr && !heads.includes(tr)) {
+    let column = 0;
+    for (const c of tr.cells) { if (c === cell) break; column += Math.max(1, c.colSpan || 1); }
+    const names = [...new Set(heads.map((r) => plainText(cellAt(r, column))).filter(Boolean))];
+    if (names.length) parts.push(["Column", names.join(" / ")]);
+  }
+  if (tr && tr.cells[0] && tr.cells[0] !== cell && !heads.includes(tr)) parts.push(["Row", plainText(tr.cells[0])]);
+  if (table.caption) parts.push(["Caption", plainText(table.caption)]);
+  else {
+    const before = table.previousElementSibling;
+    if (before && !/^H[1-6]$/.test(before.tagName) && plainText(before).length <= 200) parts.push(["Above the table", plainText(before)]);
+  }
+  if (heading) parts.push(["Section", plainText(heading)]);
+  if (table.tFoot) parts.push(["Table note", plainText(table.tFoot)]);
+  let next = table.nextElementSibling;
+  for (let k = 0; next && k < 6; k += 1, next = next.nextElementSibling) {
+    const text = plainText(next);
+    if (!text) continue;
+    if (!NOTE_TEXT.test(text)) break;
+    parts.push(["Note", text]);
+  }
+  return parts.filter(([, v]) => v);
 }
 async function openTarget(target, origin, row, note = "") {
   const viewer = $("viewer");
@@ -1850,15 +1907,30 @@ async function openTarget(target, origin, row, note = "") {
   const doc = el("div"); doc.className = "rendered-doc " + m.render_mode; doc.setAttribute("aria-label", "Rendered source");
   const ids = new Map();
   data.derivative.nodes.forEach((n) => doc.append(buildNode(n, ids)));
-  viewer.replaceChildren(header, statusLine, fidelity, doc);
+  const context = el("p"); context.className = "target-context"; context.id = "target-context"; context.hidden = true;
+  viewer.replaceChildren(header, statusLine, context, fidelity, doc);
   let first = null;
   if (record.status === "exact") {
-    record.dom_targets.forEach((id) => {
-      const n = ids.get(id); if (!n) return;
+    const found = record.dom_targets.map((id) => ids.get(id));
+    if (!found.length || found.some((n) => !n)) {
+      // Never claim an exact location the page cannot show (the server refuses such manifests first).
+      statusLine.textContent = "Location unavailable · the exact target is missing from this rendering; nothing is highlighted"
+        + (note ? " · " + note : "");
+      statusLine.dataset.downgraded = "missing-node";
+      statusLine.tabIndex = -1;
+    } else found.forEach((n) => {
       n.classList.add("target-hit"); n.setAttribute("aria-current", "location");
       if (n.tagName !== "TR") markExcerpt(n, record.excerpt);
       first = first || n;
     });
+    if (first) {
+      const parts = targetContext(first, doc);
+      if (parts.length) {
+        context.textContent = "Context of the cited location: " + parts.map(([k, v]) => `${k}: ${v}`).join(" · ");
+        context.hidden = false;
+        first.setAttribute("aria-describedby", "target-context");
+      }
+    }
   } else if (record.status === "page_only" && record.page) {
     first = doc.querySelector(`[data-page="${record.page}"]`);
     first?.classList.add("target-page");

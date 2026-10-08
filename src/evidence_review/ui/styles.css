@@ -294,6 +294,20 @@ body.atomic-mode main { grid-template-areas: "report report report" "height heig
 .viewer-head h3 { margin: 0; }
 .target-status { font-weight: 600; }
 .rendered-doc { overflow: auto; max-width: 100%; }
+/* Long sources scroll inside the viewer, so the title, status and cited-cell context stay in view and a
+   table's column headers (period, unit) stay pinned above the highlighted row. */
+body.atomic-mode .review-pane[aria-label="Evidence"] { display: flex; flex-direction: column; }
+body.atomic-mode .review-pane[aria-label="Evidence"] > * { flex: none; }
+body.atomic-mode #viewer:not([hidden]) { flex: 1 1 auto; min-height: 16rem; display: flex; flex-direction: column; }
+body.atomic-mode #viewer > * { flex: none; }
+body.atomic-mode #viewer > .rendered-doc { flex: 1 1 auto; min-height: 10rem; }
+.rendered-doc thead th, .rendered-doc thead td { position: sticky; top: 0; z-index: 1; background: #fff;
+  box-shadow: inset 0 -2px 0 #879bad; }
+.target-context { margin: .2rem 0 .4rem; padding: .25rem .5rem; border-left: 3px solid #1f5f99; background: #f3f7fb; }
+@media (max-width: 1000px) {
+  body.atomic-mode .review-pane[aria-label="Evidence"] { display: block; }
+  body.atomic-mode #viewer > .rendered-doc { max-height: 70vh; }
+}
 .rendered-doc .render-line { display: block; white-space: pre-wrap; }
 .rendered-doc pre .render-line { font-family: ui-monospace, monospace; }
 .rendered-doc .render-notice { font-style: italic; border-left: 3px solid #879bad; padding-left: .5rem; }

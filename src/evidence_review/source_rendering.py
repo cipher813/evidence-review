@@ -30,7 +30,7 @@ from .atomic_evidence import (
     target_identity,
     validate_render_manifest,
 )
-from .contracts import digest
+from .contracts import Citation, digest
 from .table_context import _cells
 
 RENDERER = {"name": "evidence-review/source-rendering", "version": "1"}
@@ -50,6 +50,35 @@ DROPPED = {"script", "style", "noscript", "template", "iframe", "frame", "frames
            "head", "title", "input", "select", "textarea", "button", "option", "datalist", "output", "dialog",
            "portal", "img", "image", "map", "area"}
 SAFE_ATTRS = {"colspan": r"^[1-9][0-9]?$", "rowspan": r"^[1-9][0-9]?$", "scope": r"^(row|col|rowgroup|colgroup)$"}
+# Permitted local styling (0.5.4): presentational declarations with closed value grammars only. No colour,
+# no url(), no position, no size beyond small indents; applied by the browser through CSSOM, never as markup.
+_LENGTH = r"^(?:0|\d{1,3}(?:\.\d{1,2})?(?:px|pt|em|rem|%))$"
+SAFE_STYLE = {
+    "text-align": r"^(?:left|right|center|justify|start|end)$",
+    "font-weight": r"^(?:normal|bold|bolder|lighter|[1-9]00)$",
+    "font-style": r"^(?:normal|italic|oblique)$",
+    "text-decoration": r"^(?:none|underline|line-through|overline)$",
+    "vertical-align": r"^(?:baseline|top|middle|bottom|super|sub|text-top|text-bottom)$",
+    "white-space": r"^(?:normal|nowrap|pre|pre-wrap|pre-line)$",
+    "text-indent": _LENGTH,
+    "padding-left": _LENGTH,
+    "margin-left": _LENGTH,
+}
+
+
+def _safe_style(value):
+    """(kept declarations, number dropped) for one style attribute value."""
+    kept, dropped = {}, 0
+    for declaration in (value or "").split(";"):
+        if not declaration.strip():
+            continue
+        name, sep, val = declaration.partition(":")
+        name, val = name.strip().lower(), " ".join(val.split()).lower()
+        if sep and name in SAFE_STYLE and re.match(SAFE_STYLE[name], val):
+            kept[name] = val
+        else:
+            dropped += 1
+    return kept, dropped
 
 
 class RenderLimitExceeded(ValueError):
@@ -248,8 +277,8 @@ class _Sanitizer(HTMLParser):
         self.drop_depth = 0
         self.removed = {}
 
-    def _removed(self, what):
-        self.removed[what] = self.removed.get(what, 0) + 1
+    def _removed(self, what, n=1):
+        self.removed[what] = self.removed.get(what, 0) + n
 
     def handle_starttag(self, tag, attrs):
         self.budget.step()
@@ -265,10 +294,18 @@ class _Sanitizer(HTMLParser):
             elif tag not in ("input", "meta", "link", "source", "track", "area", "base"):
                 self.drop_depth = 1
             return
+        style = {}
         for name, value in attrs:
             if name.startswith("on"):
                 self._removed("removed event-handler attribute")
-            elif name in ("href", "src", "srcset", "style", "action", "formaction", "background", "poster"):
+            elif name == "style":
+                kept, dropped = _safe_style(value)
+                style.update(kept)
+                if kept:
+                    self._removed("kept allowlisted local style declaration", len(kept))
+                if dropped:
+                    self._removed("removed style declaration outside the allowlist", dropped)
+            elif name in ("href", "src", "srcset", "action", "formaction", "background", "poster"):
                 self._removed(f"removed {name} attribute")
         if tag not in ALLOWED_TAGS or tag in ("page", "glyphs", "line", "notice"):
             self._removed(f"unwrapped <{tag}>")
@@ -279,6 +316,8 @@ class _Sanitizer(HTMLParser):
         safe = {n: v for n, v in attrs if n in SAFE_ATTRS and v is not None and re.match(SAFE_ATTRS[n], v)}
         if safe:
             node["attrs"] = safe
+        if style and tag not in ("page", "glyphs", "line", "notice"):
+            node["style"] = style
         self.stack[-1]["children"].append(node)
         if tag in VOID_TAGS:
             return
@@ -310,9 +349,47 @@ def _html_tree(data, budget, transforms):
     parser = _Sanitizer(budget)
     parser.feed(text)
     parser.close()
+    inferred = _infer_header_scope(parser.root["children"])
+    if inferred:
+        parser.removed["added header scope inferred from table structure"] = inferred
     for what, n in sorted(parser.removed.items()):
         transforms.append(f"{what} ({n})")
     return parser.root["children"]
+
+
+def _infer_header_scope(nodes):
+    """Give header cells without ``scope`` the association their table position proves, for screen readers.
+
+    A ``th`` in ``thead`` (or in a first row made only of ``th``) heads its column; a ``th`` that starts a
+    body row heads its row. Any other ``th`` is left alone: nothing is guessed. Returns the count added."""
+    added = 0
+    for table, _ in list(_walk(nodes)):
+        if table["tag"] != "table":
+            continue
+        rows, in_head = [], set()
+
+        def collect(children, parent):
+            for node in children:
+                if node["tag"] == "table":
+                    continue  # A nested table is handled on its own.
+                if node["tag"] == "tr":
+                    rows.append(node)
+                    if parent["tag"] == "thead":
+                        in_head.add(node["id"])
+                collect(node.get("children", []), node)
+        collect(table.get("children", []), table)
+        for k, row in enumerate(rows):
+            cells = [c for c in row.get("children", []) if c["tag"] in ("td", "th")]
+            column_row = row["id"] in in_head or (k == 0 and not in_head and cells
+                                                  and all(c["tag"] == "th" for c in cells))
+            for j, cell in enumerate(cells):
+                if cell["tag"] != "th" or "scope" in cell.get("attrs", {}):
+                    continue
+                scope = "col" if column_row else "row" if j == 0 else None
+                if scope:
+                    cell.setdefault("attrs", {})["scope"] = scope
+                    added += 1
+    return added
 
 
 def _walk(nodes, parent=None):
@@ -695,7 +772,7 @@ def _finish(bundle, source, mode, lineage, note, raw_sha, media, transforms, nod
         frozen_sha256=source.sha256, raw_sha256=raw_sha, raw_media_type=media, render_mode=mode, lineage=lineage,
         fidelity_note=note, derivative_sha256=digest(derivative), mapping_sha256=digest(target_dump),
         renderer=dict(RENDERER), transforms=transforms, targets=targets)
-    return RenderedSourceAsset(validate_render_manifest(bundle, manifest), derivative).verify()
+    return validate_render_asset(bundle, RenderedSourceAsset(manifest, derivative))
 
 
 def render_frozen_text(bundle, source_id, atom_manifest=None, limits=RenderLimits()):
@@ -779,6 +856,90 @@ def resolve_render_target(manifest, target_id):
     return target
 
 
+LINE_MODES = ("faithful_markdown", "normalized_snapshot")
+UNPROVEN_EXACT = "claims an exact location the rendered derivative does not prove"
+
+
+def _key(text):
+    """Comparison key for node text: whitespace, table pipes and escapes carry no identity here."""
+    return re.sub(r"[\s|\\]+", "", text)
+
+
+def _line_maps(nodes):
+    """Rebuild the line-to-node maps of a line-faithful derivative from the derivative itself."""
+    line_nodes, cells_by_line = {}, {}
+    for node, parent in _walk(nodes):
+        if "line" not in node:
+            continue
+        line_nodes[node["line"]] = node["id"]
+        if node["tag"] == "tr":
+            if parent is not None and parent["tag"] == "thead":
+                # The separator line has no node of its own; it maps to the header row.
+                line_nodes.setdefault(node["line"] + 1, node["id"])
+            else:
+                cells_by_line[node["line"]] = [c for c in node.get("children", []) if c["tag"] in ("td", "th")]
+    return line_nodes, cells_by_line
+
+
+def _proven_exact(manifest, derivative, source, target):
+    """The exact target this package's own deterministic mapping derives from the derivative for one citation."""
+    citation = Citation(source_id=target.source_id, start_line=target.start_line, end_line=target.end_line,
+                        excerpt=target.excerpt, status="located")
+    nodes = derivative.get("nodes", [])
+    if manifest.render_mode in LINE_MODES:
+        line_nodes, cells = _line_maps(nodes)
+        found = _line_targets(source, [citation], line_nodes, cells, target.raw_sha256)[0]
+    elif manifest.render_mode == "faithful_html":
+        found = _html_targets(source, [citation], nodes, target.raw_sha256)[0]
+    elif manifest.render_mode == "pdf_text_layer":
+        found = _pdf_targets(source, [citation], nodes, target.raw_sha256, {})[0]
+    else:
+        return None
+    return found if found.status == "exact" else None
+
+
+def validate_render_asset(bundle, asset):
+    """Refuse a rendered asset whose targets are not backed by its own derivative.
+
+    Beyond the hash binding (``verify``), the node allowlist and the manifest's
+    bundle binding, every node id a target names must exist in the derivative,
+    a page must be a page of the derivative, every ambiguous candidate must hold
+    the excerpt, and an ``exact`` target must be exactly what this package's
+    deterministic mapping derives from the derivative for that citation: the
+    same nodes (and PDF page and box). A caller-supplied manifest cannot claim an
+    exact location that is missing, unrelated, or merely holds the same text in
+    another row, period or metric. Refused, never downgraded, like a hash mismatch."""
+    if not isinstance(asset, RenderedSourceAsset):
+        raise TypeError("rendered_sources must contain RenderedSourceAsset objects")
+    derivative = check_derivative(asset.verify().derivative)
+    manifest = validate_render_manifest(bundle, asset.manifest)
+    if derivative.get("source_id") != manifest.source_id or derivative.get("render_mode") != manifest.render_mode:
+        raise ValueError("rendered derivative belongs to another source or render mode")
+    source = next(s for s in bundle.sources if s.source_id == manifest.source_id)
+    by_id, pages = {}, {}
+    for node, _ in _walk(derivative.get("nodes", [])):
+        if node["id"] in by_id:
+            raise ValueError("rendered derivative repeats a node id")
+        by_id[node["id"]] = node
+        if node["tag"] == "page":
+            pages[node.get("page")] = node
+    for t in manifest.targets:
+        named = [*t.dom_targets, *(i for c in t.candidates for i in c)]
+        if any(i not in by_id for i in named):
+            raise ValueError(f"render target {t.target_id} names a node absent from the rendered derivative")
+        if t.page is not None and manifest.render_mode == "pdf_text_layer" and t.page not in pages:
+            raise ValueError(f"render target {t.target_id} names a page absent from the rendered derivative")
+        for candidate in t.candidates:
+            if _key(t.excerpt) not in _key(" ".join(_text_of(by_id[i]) for i in candidate)):
+                raise ValueError(f"render target {t.target_id} has a candidate that does not hold its excerpt")
+        if t.status == "exact":
+            proven = _proven_exact(manifest, derivative, source, t)
+            if proven is None or proven.dom_targets != t.dom_targets or (
+                    manifest.render_mode == "pdf_text_layer" and (proven.page, proven.bbox) != (t.page, t.bbox)):
+                raise ValueError(f"render target {t.target_id} {UNPROVEN_EXACT}")
+    return RenderedSourceAsset(manifest, derivative)
+
+
 def check_derivative(derivative):
     """Structural allowlist check of a derivative tree; refuses unknown tags or attributes."""
     def visit(node):
@@ -787,8 +948,12 @@ def check_derivative(derivative):
         attrs = node.get("attrs", {})
         if set(attrs) - set(SAFE_ATTRS) or any(not re.match(SAFE_ATTRS[k], str(v)) for k, v in attrs.items()):
             raise ValueError("derivative contains an unsafe attribute")
-        allowed = {"id", "tag", "text", "children", "attrs", "line", "page", "width", "height", "x", "y", "size",
-                   "bbox", "text_layer"}
+        style = node.get("style", {})
+        if not isinstance(style, dict) or any(k not in SAFE_STYLE or not re.match(SAFE_STYLE[k], str(v))
+                                              for k, v in style.items()):
+            raise ValueError("derivative contains an unsafe style declaration")
+        allowed = {"id", "tag", "text", "children", "attrs", "style", "line", "page", "width", "height", "x", "y",
+                   "size", "bbox", "text_layer"}
         if set(node) - allowed:
             raise ValueError("derivative node has unknown fields")
         for child in node.get("children", []):

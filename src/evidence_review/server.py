@@ -12,9 +12,10 @@ from importlib.resources import files
 from urllib.parse import urlsplit, parse_qsl
 import re
 from .atomic_evidence import (ATOM_EVIDENCE_SCHEMA, RENDER_MANIFEST_SCHEMA, atom_view, build_atom_manifest,
-                              validate_atom_evidence, validate_render_manifest)
+                              validate_atom_evidence)
 from .contracts import ReviewWorkload, PACKAGE_VERSION, blind_terms, blind_violations, validate_bundle
-from .source_rendering import DERIVATIVE_SCHEMA, RenderedSourceAsset, check_derivative, render_frozen_text
+from .source_rendering import (DERIVATIVE_SCHEMA, RenderedSourceAsset, check_derivative, render_frozen_text,
+                               validate_render_asset)
 from .evidence import evidence_views, inventory, navigation_coverage
 from .store import Conflict, submission_matches_snapshot
 from .hooks import Hooks, run_hook
@@ -201,10 +202,8 @@ def open_review(
         renders = {}
         supplied = rendered_sources(b) if callable(rendered_sources) else rendered_sources
         for asset in supplied or ():
-            if not isinstance(asset, RenderedSourceAsset):
-                raise TypeError("rendered_sources must contain RenderedSourceAsset objects")
-            check_derivative(asset.verify().derivative)
-            manifest = validate_render_manifest(b, asset.manifest)
+            # Hash, allowlist, bundle binding and node proof of every exact target; refused otherwise.
+            manifest = validate_render_asset(b, asset).manifest
             if manifest.source_id in renders:
                 raise ValueError("two renderings supplied for one source")
             renders[manifest.source_id] = asset
