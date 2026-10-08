@@ -74,7 +74,7 @@ function originalLink(sourceId, excerpt, start, end) {
   if (link.note) wrap.append(el("small", " " + link.note));
   return wrap;
 }
-async function api(path, body) {
+async function api(path, body, signal) {
   const r = await fetch(path, {
     method: body ? "POST" : "GET",
     headers: {
@@ -82,6 +82,7 @@ async function api(path, body) {
       "Content-Type": "application/json",
     },
     body: body ? JSON.stringify(body) : undefined,
+    signal,
   });
   const d = await r.json();
   if (!r.ok) {
@@ -674,13 +675,14 @@ function numberAction(s, verificationControls = true) {
   }
   return fragment;
 }
-function linkedStatement(text, subjectId) {
+function linkedStatement(text, subjectId, verificationControls = !atomicMode()) {
   const wrap = el("blockquote"); wrap.className = "item-text";
   const field = bundle.fields.find((f) => f.role !== "context" && f.text === text && f.claim_ids.includes(subjectId));
   if (!field) { wrap.textContent = text; return wrap; }
   let at = 0; const chars = Array.from(text);
   bundle.spans.filter((s) => s.field_path === field.path).sort((a,b) => a.start-b.start).forEach((s) => {
-    wrap.append(document.createTextNode(chars.slice(at,s.start).join("")), numberAction(s)); at = s.end;
+    // Atomic mode owns each atom's one check control in its row; statement context here is read-only.
+    wrap.append(document.createTextNode(chars.slice(at,s.start).join("")), numberAction(s, verificationControls)); at = s.end;
   });
   wrap.append(document.createTextNode(chars.slice(at).join(""))); return wrap;
 }
@@ -1280,7 +1282,8 @@ function render() {
   $("workload-summary").hidden = true;
   if (evidence.workload || bundle.workload) {
     const w = evidence.workload || bundle.workload;
-    const label = ["independent", "adjudication"].includes(bundle.task_kind) ? "Answer" : "Task";
+    // A caller-defined generic noun ("Check 1 of 3") replaces the package default.
+    const label = w.task_noun || (["independent", "adjudication"].includes(bundle.task_kind) ? "Answer" : "Task");
     $("workload-summary").textContent = `${label} ${w.answer_index} of ${w.assigned_answers}`;
     $("workload-summary").hidden = false;
     $("workload").append(el("p", `${label} ${w.answer_index} of ${w.assigned_answers} assigned`),
@@ -1418,6 +1421,7 @@ $("next").onclick = async () => {
   subject = null;
   current = null;
   $("evidence").replaceChildren();
+  invalidateNavigation();
   renderCache.clear();
   $("viewer").replaceChildren();
   await load();
@@ -1491,6 +1495,15 @@ window.addEventListener("beforeunload", (event) => {
 // ---- atomic-source-check/v1: statements above, one row per atom left, rendered source right.
 const renderCache = new Map();
 let viewerOrigin = null;
+// Navigation fence: every source open takes a new generation and captures the
+// task it was made for. A response or failure that arrives after a newer open,
+// or after the task changed, never paints or moves focus, even if abort failed.
+let navigation = 0, taskEpoch = 0, inflight = null;
+function invalidateNavigation() {
+  navigation += 1; taskEpoch += 1;
+  if (inflight) { try { inflight.controller.abort(); } catch (_) { /* fenced regardless */ } }
+  inflight = null;
+}
 function atomicMode() {
   return evidence.presentation?.mode === "atomic-source-check/v1" && Boolean(evidence.atoms);
 }
@@ -1500,6 +1513,13 @@ const ATOM_STATE = {
   ambiguous: "Ambiguous: several candidate sources, none chosen",
   unavailable: "No source located",
   unsupported: "No supporting source identified",
+};
+// Where each row target's binding to this exact occurrence comes from.
+const BINDING = {
+  span_citation: "cited by the answer for this number",
+  prepared_evidence: "independently prepared evidence attributed to this number",
+  linked_statement_citation: "cited by the statement this fact belongs to",
+  declared_atom_citation: "declared for this fact by the caller's atomization",
 };
 function atomField(row) {
   return row.form_field_id ? bundle.form.find((f) => f.field_id === row.form_field_id) : null;
@@ -1612,16 +1632,26 @@ function renderAtomRows() {
       const open = el("button", "Open source: " + describeTarget(t));
       open.onclick = () => openTarget(t, open, r); more.append(open);
     });
+    [...r.targets, ...r.candidates].forEach((t) => {
+      if (t.binding) more.append(el("small", `${describeTarget(t)}: ${BINDING[t.binding] || t.binding}`));
+    });
     if (r.claim_ids.length) more.append(el("small", "Statement ids: " + r.claim_ids.join(", ")));
     more.append(el("small", `Atom ${r.atom_id} · offsets ${r.start}–${r.end} in ${r.field_path}`));
     row.append(more);
     box.append(row);
   });
 }
-async function renderedSource(sourceId) {
-  if (!renderCache.has(sourceId)) renderCache.set(sourceId, api("/api/source-render/" + encodeURIComponent(sourceId)));
-  try { return await renderCache.get(sourceId); }
-  catch (err) { renderCache.delete(sourceId); throw err; }
+function renderedSource(sourceId) {
+  let entry = renderCache.get(sourceId);
+  if (!entry) {
+    const controller = new AbortController();
+    const promise = api("/api/source-render/" + encodeURIComponent(sourceId), undefined, controller.signal);
+    entry = { promise, controller };
+    renderCache.set(sourceId, entry);
+    // Only this request's own entry is dropped on failure, never a newer task's entry.
+    promise.catch(() => { if (renderCache.get(sourceId) === entry) renderCache.delete(sourceId); });
+  }
+  return entry;
 }
 function buildNode(node, ids) {
   const tags = { line: "span", glyphs: "span", page: "div", notice: "p" };
@@ -1661,8 +1691,18 @@ function markExcerpt(node, excerpt) {
 }
 async function openTarget(target, origin, row, note = "") {
   const viewer = $("viewer");
+  const generation = ++navigation, epoch = taskEpoch, bundleId = bundle.bundle_id, bundleHash = state.bundle_hash;
+  const stale = () => generation !== navigation || epoch !== taskEpoch || bundleId !== bundle.bundle_id
+    || bundleHash !== state.bundle_hash;
+  // A pending open of another source is superseded: abort it (best effort; the fence still holds).
+  if (inflight && inflight.sourceId !== target.source_id) {
+    try { inflight.controller.abort(); } catch (_) { /* fenced regardless */ }
+    if (renderCache.get(inflight.sourceId) === inflight.entry) renderCache.delete(inflight.sourceId);
+  }
+  inflight = null;
   viewerOrigin = origin;
   viewer.hidden = false;
+  viewer.dataset.targetId = target.target_id;
   logEvent("rendered_target_opened", target.target_id);
   if (!target.rendered) {
     // No rendering for this citation: show the frozen lines rather than nothing.
@@ -1672,15 +1712,28 @@ async function openTarget(target, origin, row, note = "") {
     return;
   }
   viewer.replaceChildren(el("p", "Opening source…"));
+  const entry = renderedSource(target.source_id);
+  inflight = { sourceId: target.source_id, controller: entry.controller, entry };
   let data;
-  try { data = await renderedSource(target.source_id); }
-  catch (err) { viewer.replaceChildren(el("p", "Rendered source unavailable: " + err.message)); return; }
+  try { data = await entry.promise; }
+  catch (err) {
+    if (stale()) return;
+    inflight = null;
+    viewer.replaceChildren(el("p", "Rendered source unavailable: " + err.message));
+    return;
+  }
+  if (stale()) return;
+  inflight = null;
+  if (data.manifest.bundle_hash !== bundleHash) {
+    viewer.replaceChildren(el("p", "Rendered source unavailable: it belongs to a different task."));
+    return;
+  }
   const m = data.manifest;
   const record = m.targets.find((t) => t.target_id === target.target_id) || target;
   const source = bundle.sources.find((s) => s.source_id === m.source_id);
   const header = el("div"); header.className = "viewer-head";
   const back = el("button", "Back to row"); back.type = "button";
-  back.onclick = () => viewerOrigin?.focus();
+  back.onclick = () => origin?.focus();
   header.append(el("h3", source ? source.title : m.source_id), back);
   const label = {exact: "Exact location highlighted", page_only: "Page-only location: the line is not highlighted",
     ambiguous: "Ambiguous: several matches, none chosen", unavailable: "Location unavailable"}[record.status] || record.status;

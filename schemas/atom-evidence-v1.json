@@ -2,7 +2,7 @@
   "$defs": {
     "AtomCitation": {
       "additionalProperties": false,
-      "description": "A caller-declared located citation for a fact atom, validated against frozen text.",
+      "description": "A caller-declared located citation for a fact atom, validated against frozen text.\n\n``atom_ids`` attributes the citation to the exact fact occurrences it was\ndeclared for; a fact atom may navigate to a declared citation only when it\nis named here (or the citation is one of its linked claims' own).",
       "properties": {
         "target_id": {
           "pattern": "^tgt:[0-9a-f]{24}$",
@@ -11,6 +11,13 @@
         },
         "citation": {
           "$ref": "#/$defs/Citation"
+        },
+        "atom_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Atom Ids",
+          "type": "array"
         }
       },
       "required": [
