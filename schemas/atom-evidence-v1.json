@@ -145,6 +145,13 @@
           },
           "title": "Prepared Refs",
           "type": "array"
+        },
+        "prepared_input_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Prepared Input Refs",
+          "type": "array"
         }
       },
       "required": [

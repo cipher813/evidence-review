@@ -61,6 +61,10 @@ def build_manifest(root, verification, coverage, tests_passed, source_tree):
             "or unknown control ids refused before serving; bound check submits and reloads in Chromium",
             "occurrence-bound prepared calculations shown and navigable in atomic rows beside the unchanged "
             "original candidate evidence, never checking a row (synthetic fixtures, Chromium)",
+            "startup with denied tab storage (accessor, getItem, setItem): launch fragment scrubbed, token kept in "
+            "memory, navigation, check, save and submit work, reload without a token shows safe recovery (Chromium)",
+            "occurrence-bound partial prepared inputs (direct and nested) shown and navigable in atomic rows beside "
+            "the original inputs, which keep their own unresolved status, never checking a row (synthetic, Chromium)",
         ],
         "unverified": [
             "human usability and reviewer effort (no pilot run)",

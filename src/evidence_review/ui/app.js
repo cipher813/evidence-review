@@ -1,9 +1,28 @@
 "use strict";
-const token =
-  new URLSearchParams(location.hash.slice(1)).get("token") ||
-  sessionStorage.getItem("review-token");
-if (token) sessionStorage.setItem("review-token", token);
+// The launch token is read from the fragment and the fragment is scrubbed before
+// anything that can throw. Tab storage is optional: when the browser denies it,
+// the token lives only in this page's memory and a reload shows safe recovery.
+const launchFragment = location.hash.slice(1);
 history.replaceState(null, "", location.pathname);
+const tabStore = (() => {
+  const memory = new Map();
+  let available = true;
+  const storage = () => { try { return window.sessionStorage; } catch (error) { available = false; return null; } };
+  return {
+    get(key) {
+      try { const v = storage()?.getItem(key); if (v !== null && v !== undefined) return v; }
+      catch (error) { available = false; }
+      return memory.has(key) ? memory.get(key) : null;
+    },
+    set(key, value) {
+      memory.set(key, value);
+      try { storage()?.setItem(key, value); } catch (error) { available = false; }
+    },
+    get available() { return available; },
+  };
+})();
+const token = new URLSearchParams(launchFragment).get("token") || tabStore.get("review-token");
+if (token) tabStore.set("review-token", token);
 let bundle,
   evidence = { views: {}, inventory: null },
   state,
@@ -1364,7 +1383,7 @@ async function load() {
   $("assessor").value =
     state.assessor ||
     state.suggested_assessor ||
-    sessionStorage.getItem("assessor") ||
+    tabStore.get("assessor") ||
     "";
   queue = Promise.resolve();
   render();
@@ -1374,7 +1393,7 @@ $("close-guide").onclick = () => $("review-guide").close();
 $("open-resources").onclick = () => $("resource-dialog").showModal();
 $("close-resources").onclick = () => $("resource-dialog").close();
 $("assessor").oninput = () =>
-  sessionStorage.setItem("assessor", $("assessor").value.trim());
+  tabStore.set("assessor", $("assessor").value.trim());
 $("add-defect").onclick = () => {
   answers.defects.push({
     defect_id: "D" + crypto.randomUUID(),
@@ -1519,6 +1538,7 @@ const BINDING = {
   span_citation: "cited by the answer for this number",
   prepared_evidence: "independently prepared evidence attributed to this number",
   prepared_calculation_input: "input of an independently prepared calculation attributed to this occurrence",
+  prepared_input: "independently located input of this occurrence's own calculation",
   linked_statement_citation: "cited by the statement this fact belongs to",
   declared_atom_citation: "declared for this fact by the caller's atomization",
 };
@@ -1589,6 +1609,47 @@ function renderPreparation(p, r, more) {
   }
   more.append(box);
 }
+// Independently located inputs of the original calculation, beside (never replacing) the original inputs.
+function renderPreparedInputs(inputs, r, more) {
+  if (!inputs.length) return;
+  const box = el("section"); box.className = "atom-prepared-inputs";
+  box.setAttribute("aria-label", `Independently located inputs for “${r.text}”`);
+  box.append(el("h4", "Independently located inputs"), el("p", inputs[0].provenance));
+  inputs.forEach((o) => {
+    const item = el("div"); item.className = "atom-prepared-input"; item.dataset.preparedInputRef = o.ref;
+    const what = [o.value + (o.unit ? " " + o.unit : ""), o.period, o.entity].filter(Boolean).join(" · ");
+    item.append(el("h5", `${o.label}: ${what}`));
+    if (o.original) {
+      item.append(el("small", `Original candidate input: ${o.original.status}${o.original.reason ? ": " + o.original.reason : ""}`));
+    }
+    if (o.source) {
+      const line = el("p", `Located source: ${o.source.target ? describeTarget(o.source.target) : o.source.source_id} · ${o.source.status}${o.source.reason ? ": " + o.source.reason : ""}`);
+      if (o.source.target) {
+        const open = el("button", "Open located input source");
+        open.setAttribute("aria-label", `Open the located source for input “${o.name}” of “${r.text}”`);
+        open.onclick = () => openTarget(o.source.target, open, r, "Independently located input; not a support judgment");
+        line.append(open);
+      }
+      item.append(line);
+    }
+    if (o.calculation) {
+      renderCalculation(o.calculation, item, true, o.calculation.operands, true);
+      o.calculation_leaves.forEach((leaf, k) => {
+        const line = el("p", `Input “${o.name}” part ${k + 1}: ${leaf.target ? describeTarget(leaf.target) : leaf.source_id} · ${leaf.status}${leaf.reason ? ": " + leaf.reason : ""}`);
+        if (leaf.target) {
+          const open = el("button", "Open part source");
+          open.setAttribute("aria-label", `Open part ${k + 1} source of input “${o.name}” for “${r.text}”`);
+          open.onclick = () => openTarget(leaf.target, open, r, "Part of an independently located input; not a support judgment");
+          line.append(open);
+        }
+        item.append(line);
+      });
+    }
+    item.append(el("small", `Reference ${o.ref}`));
+    box.append(item);
+  });
+  more.append(box);
+}
 function renderAtomRows() {
   const box = $("atoms");
   box.hidden = false;
@@ -1629,7 +1690,8 @@ function renderAtomRows() {
     }
     if (r.reason) head.append(el("small", "Reason: " + r.reason));
     const preparations = r.preparations || [];
-    if (preparations.length) {
+    const preparedInputs = r.prepared_inputs || [];
+    if (preparations.length || preparedInputs.length) {
       const note = el("small", "Independently prepared evidence is available in the details; it is not a support judgment.");
       note.className = "atom-prepared-note"; head.append(note);
     }
@@ -1655,6 +1717,7 @@ function renderAtomRows() {
         });
       }
     }
+    renderPreparedInputs(preparedInputs, r, more);
     preparations.forEach((p) => renderPreparation(p, r, more));
     if (r.numeric_span_id) {
       const span = bundle.spans.find((s) => s.span_id === r.numeric_span_id);
@@ -1903,7 +1966,22 @@ function setupPaneDividers() {
   apply();
 }
 setupPaneDividers();
-load().catch((err) => {
+// Without a launch token nothing is requested; the reviewer gets a safe way back in.
+function showRecovery(reason) {
   $("status").className = "save-error";
-  $("status").textContent = err.message;
-});
+  $("status").textContent = reason + " Reopen this review from the launch link printed by the review command; "
+    + "no answers are lost, because saved judgments live on the review server, not in this tab.";
+}
+if (!token) {
+  showRecovery(tabStore.available ? "This page was opened without its launch token."
+    : "This browser blocks tab storage, so the launch token could not be kept across a reload.");
+} else {
+  load().catch((err) => {
+    if (err.status === 401 || err.status === 403) {
+      showRecovery("The review server did not accept this tab's launch token.");
+      return;
+    }
+    $("status").className = "save-error";
+    $("status").textContent = err.message;
+  });
+}
