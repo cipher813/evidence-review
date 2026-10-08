@@ -112,6 +112,10 @@ class AtomEvidenceItem(Strict):
     # into that span's ``prepared_evidence``. Shown beside the original candidate
     # evidence, never instead of it, and never a support judgment.
     prepared_refs: list[str] = Field(default_factory=list)
+    # Independently located inputs of this occurrence's own candidate calculation,
+    # ``prepared-input:<span id>:<index>`` into that span's ``prepared_inputs``.
+    # Shown beside the original inputs, never replacing them or their errors.
+    prepared_input_refs: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def shape(self):
@@ -131,6 +135,8 @@ class AtomEvidenceItem(Strict):
             raise ValueError("only ambiguous atoms carry candidates")
         if len(set(self.prepared_refs)) != len(self.prepared_refs):
             raise ValueError("duplicate prepared evidence reference")
+        if len(set(self.prepared_input_refs)) != len(self.prepared_input_refs):
+            raise ValueError("duplicate prepared input reference")
         return self
 
     @model_serializer(mode="wrap")
@@ -139,6 +145,8 @@ class AtomEvidenceItem(Strict):
         # Optional extension: manifests without preparation serialize as before.
         if not self.prepared_refs:
             data.pop("prepared_refs", None)
+        if not self.prepared_input_refs:
+            data.pop("prepared_input_refs", None)
         return data
 
 
@@ -240,6 +248,22 @@ def prepared_ref(span, index):
     return f"prepared:{span.span_id}:{index}"
 
 
+def prepared_input_ref(span, index):
+    return f"prepared-input:{span.span_id}:{index}"
+
+
+def _prepared_input_for(bundle, ref):
+    """The (span, Operand) a ``prepared-input:<span id>:<index>`` reference names, or None."""
+    kind, _, rest = (ref or "").partition(":")
+    span_id, _, index = rest.rpartition(":")
+    if kind != "prepared-input" or not index.isdigit() or str(int(index)) != index:
+        return None
+    span = next((s for s in bundle.spans if s.span_id == span_id), None)
+    if span is None or int(index) >= len(span.prepared_inputs):
+        return None
+    return span, span.prepared_inputs[int(index)]
+
+
 def _prepared_for(bundle, ref):
     """The (span, PreparedEvidence) a ``prepared:<span id>:<index>`` reference names, or None."""
     kind, _, rest = (ref or "").partition(":")
@@ -258,7 +282,7 @@ def build_atom_manifest(bundle, facts=(), *, method="evidence-review/numeric-inv
     """Quantity atoms from the bundle's own numeric inventory plus caller facts.
 
     ``facts`` are dicts ``{field_path, start, end, claim_ids, evidence_state,
-    reason, citations, calculation_ref, prepared_refs}`` declared by the caller's atomization;
+    reason, citations, calculation_ref, prepared_refs, prepared_input_refs}`` declared by the caller's atomization;
     ``citations`` are bundle Citation objects. With ``coverage="assigned"``
     only ``assigned_span_ids`` become quantity atoms and every other asserted
     number in scope is recorded as context, so nothing is silently dropped.
@@ -286,7 +310,8 @@ def build_atom_manifest(bundle, facts=(), *, method="evidence-review/numeric-inv
                                     "unavailable": "No source located for this number"}.get(state, "")),
             citation_target_ids=targets if state == "located" else [],
             candidate_target_ids=targets if state == "ambiguous" else [], calculation_ref=calc,
-            prepared_refs=[prepared_ref(span, i) for i in range(len(span.prepared_evidence))]))
+            prepared_refs=[prepared_ref(span, i) for i in range(len(span.prepared_evidence))],
+            prepared_input_refs=[prepared_input_ref(span, i) for i in range(len(span.prepared_inputs))]))
     for fact in facts:
         field = fields[fact["field_path"]]
         start, end = fact["start"], fact["end"]
@@ -304,7 +329,8 @@ def build_atom_manifest(bundle, facts=(), *, method="evidence-review/numeric-inv
             form_field_id=fact_checks.get(atom_id), evidence_state=state, reason=fact.get("reason", ""),
             citation_target_ids=targets if state == "located" else [],
             candidate_target_ids=targets if state == "ambiguous" else [],
-            calculation_ref=fact.get("calculation_ref"), prepared_refs=list(fact.get("prepared_refs", ()))))
+            calculation_ref=fact.get("calculation_ref"), prepared_refs=list(fact.get("prepared_refs", ())),
+            prepared_input_refs=list(fact.get("prepared_input_refs", ()))))
     context = [s.span_id for s in asserted if s.span_id not in assigned]
     return AtomEvidenceManifest(
         bundle_id=bundle.bundle_id, bundle_hash=bundle.bundle_hash, provenance=provenance,
@@ -365,6 +391,12 @@ def atom_target_bindings(bundle, manifest, item):
         for p in span.prepared_evidence:
             for t in _located_ids(bundle, p.citations):
                 bound.setdefault(t, "prepared_evidence")
+        for o in span.prepared_inputs:
+            for t in _located_ids(bundle, [o.citation] if o.citation else []):
+                bound.setdefault(t, "prepared_input")
+            if o.calculation:
+                for t in _located_ids(bundle, calculation_citations(o.calculation)):
+                    bound.setdefault(t, "prepared_input")
         return bound
     linked = set(item.claim_ids)
     for c in [*bundle.claims, *bundle.references]:
@@ -436,6 +468,29 @@ def _validate_prepared_refs(bundle, item):
                              "known prepared evidence is never hidden")
 
 
+def _owns(item, span):
+    if item.kind == "quantity":
+        return span.span_id == item.numeric_span_id
+    # A fact may show the preparation of a number written inside its own words.
+    return span.field_path == item.field_path and item.start <= span.start and span.end <= item.end
+
+
+def _validate_prepared_input_refs(bundle, item):
+    """Prepared input references are this occurrence's own, and a number lists every one of its own."""
+    for ref in item.prepared_input_refs:
+        found = _prepared_input_for(bundle, ref)
+        if found is None:
+            raise ValueError(f"atom references unknown prepared input {ref!r}")
+        if not _owns(item, found[0]):
+            raise ValueError(f"prepared input {ref!r} belongs to another occurrence, not this atom's own")
+    if item.kind == "quantity":
+        span = next((s for s in bundle.spans if s.span_id == item.numeric_span_id), None)
+        expected = [prepared_input_ref(span, i) for i in range(len(span.prepared_inputs))] if span else []
+        if span is not None and item.prepared_input_refs != expected:
+            raise ValueError("quantity atom must list exactly its own span's prepared inputs, in order; "
+                             "a known prepared operand is never hidden")
+
+
 def validate_atom_evidence(bundle, payload, render_manifests=()):
     """Structural, occurrence and hash integrity of an atom inventory.
 
@@ -492,6 +547,7 @@ def validate_atom_evidence(bundle, payload, render_manifests=()):
         if item.calculation_ref and not calculation_bound(bundle, item):
             raise ValueError("atom calculation is not its own occurrence's calculation")
         _validate_prepared_refs(bundle, item)
+        _validate_prepared_input_refs(bundle, item)
         _validate_check_binding(item, form, quantity_checks if item.kind == "quantity" else fact_checks)
         bound = atom_target_bindings(bundle, manifest, item)
         for t in [*item.citation_target_ids, *item.candidate_target_ids]:
@@ -533,6 +589,9 @@ def validate_atom_evidence(bundle, payload, render_manifests=()):
     return manifest
 
 
+PREPARED_INPUT_PROVENANCE = ("Independently located for review as one input of this occurrence's own candidate "
+                             "calculation; shown beside the original input, which keeps its own status. Not a "
+                             "support judgment, and it never checks a row.")
 PREPARATION_PROVENANCE = ("Independently prepared for review and attributed to this exact occurrence; not "
                           "supplied by the answer, not a support judgment, and it never checks a row.")
 
@@ -585,13 +644,33 @@ def atom_view(bundle, manifest, render_manifests=()):
                 "targets": [describe(t, "prepared_evidence") for t in _located_ids(bundle, prepared.citations)],
                 "calculation": prepared.calculation.model_dump(mode="json") if prepared.calculation else None,
                 "calculation_leaves": leaves_of(prepared.calculation, "prepared_calculation_input")})
+        prepared_inputs = []
+        for ref in item.prepared_input_refs:
+            span, operand = _prepared_input_for(bundle, ref)
+            source = {o.name: o for o in span.calculation.operands}.get(operand.name) if span.calculation else None
+            original = source.citation if source is not None else None
+            direct = operand.citation
+            tid = citation_target_id(bundle, direct) if direct is not None else None
+            prepared_inputs.append({
+                "ref": ref, "span_id": span.span_id, "name": operand.name, "value": operand.value,
+                "unit": operand.unit, "period": operand.period, "entity": operand.entity, "kind": operand.kind,
+                "label": f"Independently located input “{operand.name}”", "provenance": PREPARED_INPUT_PROVENANCE,
+                # The original candidate input keeps its own status and reason; never overwritten here.
+                "original": {"status": original.status, "reason": original.reason} if original is not None else None,
+                "source": ({"source_id": direct.source_id, "status": direct.status, "reason": direct.reason,
+                            "start_line": direct.start_line, "end_line": direct.end_line,
+                            "target": describe(tid, "prepared_input") if tid else None}
+                           if direct is not None else None),
+                "calculation": operand.calculation.model_dump(mode="json") if operand.calculation else None,
+                "calculation_leaves": leaves_of(operand.calculation, "prepared_input")})
         rows.append({**item.model_dump(mode="json"), "prepared_refs": list(item.prepared_refs),
+                     "prepared_input_refs": list(item.prepared_input_refs),
                      "targets": [describe(t, bindings.get(t)) for t in item.citation_target_ids],
                      "candidates": [describe(t, bindings.get(t)) for t in item.candidate_target_ids],
                      "calculation": calc.model_dump(mode="json") if calc else None,
                      "calculation_leaves": leaves_of(calc, "calculation_input"),
                      # Kept apart from the original candidate evidence above; never merged into it.
-                     "preparations": preparations})
+                     "preparations": preparations, "prepared_inputs": prepared_inputs})
     return {"schema_version": manifest.schema_version, "provenance": manifest.provenance,
             "atomization": manifest.atomization.model_dump(mode="json"), "rows": rows,
             "verification_note": "Opening a source, matching a number or recomputing arithmetic never checks a row."}
