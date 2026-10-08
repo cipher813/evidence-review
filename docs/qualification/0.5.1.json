@@ -1,0 +1,56 @@
+{
+  "schema_version": "evidence-review-qualification/v1",
+  "package_version": "0.5.1",
+  "source_tree_sha1": "53a857443f7dfd4023c0493e834ec68e0cd231d3",
+  "verified_source_commit": "a630d5a894ca9d86460c1e5ba4c30b5738fd4dcb",
+  "wheel": "evidence_review-0.5.1-py3-none-any.whl",
+  "wheel_sha256": "6699898bcb01c03c60d885079d8a9c4c2cc8257bd879f419f780a64b80bd6fb2",
+  "reproducible_wheel": true,
+  "clean_noneditable_install": true,
+  "installed_files": {
+    "evidence_review/__init__.py": "7b515f7cf32f21d354190c893fede574af4becd1a84566a2fd7da92e17b7bba4",
+    "evidence_review/atomic_evidence.py": "4e0bc611a666bc393aca267b0e974e5727adf87a538e8be215eda3602ca72c96",
+    "evidence_review/cli.py": "ae2523bed0d08a47a12f07ef04446d98b113765d000774008296b77e9e728aba",
+    "evidence_review/contracts.py": "4a0e3e1824853fedd11f03fddf5e49747bd2f13c392c0666f8cbe86b16467065",
+    "evidence_review/evidence.py": "c980729526e0f47aa5228067dd16b36233b42725d82d19697aaf88ab6c31a3db",
+    "evidence_review/example.py": "478de2b2076833ddf05255596f38ead575f02849f0db8cde727515a808b1c030",
+    "evidence_review/hooks.py": "9937ea39705b8227c8c3c84be08b9d3f1cdeaafa89dd8cfc573556949647c24e",
+    "evidence_review/schemas/atom-evidence-v1.json": "095c87d04fa09a029943e0d164398b40ce0ba4b701978e070b9e1f6b7964a062",
+    "evidence_review/schemas/review-bundle-v1.json": "1d360e53d45a5b2439eda9c96bce3b42f541eee75a76efd75e7bde6a2b0e5ce7",
+    "evidence_review/schemas/review-submission-v1.json": "7e1918b1f9742cca9dd4a7de7e0ce939e6cb597e8776bc4ede3dc5b5e98e8819",
+    "evidence_review/schemas/source-render-manifest-v1.json": "349f9efa77bda8d47d6d31ed9fbb1ad800986b6def688ef8298c82182655bb07",
+    "evidence_review/server.py": "deca0a61e2c05806bf407075c231f73472e4227f02bd0fed1f094f5db8607efa",
+    "evidence_review/source_rendering.py": "cb620dbbf4fed1acc8faf783e6e0bfbde8a9662ec22e0cb795d8c5a30f88f07a",
+    "evidence_review/store.py": "5a9fcfaff3df5bd4ef7c1c282e2b630159122790d0d7d3578f5d705447b3b70b",
+    "evidence_review/table_context.py": "f2953f2a869bf16da716badac5cb24a01d0e606ba30670fa334916cfe365cb2c",
+    "evidence_review/ui/app.js": "5b01bf1a3e13816a588763c2c00736494f026748d6bc16828a081f7355af7c70",
+    "evidence_review/ui/index.html": "01183c345dc7c412526ee199494ae25fbab7c84595a5e9d54bbe9e12313ad823",
+    "evidence_review/ui/styles.css": "dcb99d062e8c7390ed1fd1f5dbc9a2a36dae7bfabe36cdcb417acb7447a7ce1f"
+  },
+  "installed_content_sha256": "f456c0949947b3f15a829dd37a1bbd030d0d03521f0a0eb83fbb3929bfa9ebad",
+  "schemas": {
+    "atom-evidence-v1.json": "095c87d04fa09a029943e0d164398b40ce0ba4b701978e070b9e1f6b7964a062",
+    "review-bundle-v1.json": "1d360e53d45a5b2439eda9c96bce3b42f541eee75a76efd75e7bde6a2b0e5ce7",
+    "review-submission-v1.json": "7e1918b1f9742cca9dd4a7de7e0ce939e6cb597e8776bc4ede3dc5b5e98e8819",
+    "source-render-manifest-v1.json": "349f9efa77bda8d47d6d31ed9fbb1ad800986b6def688ef8298c82182655bb07"
+  },
+  "tests_passed": 279,
+  "coverage_percent": 92.36,
+  "verified_by_automation": [
+    "contracts, atom/render sidecars and capability negotiation",
+    "offline rendering of Markdown, HTML and PDF fixtures with exact, page-only and ambiguous targets",
+    "three-pane atomic source-check layout in Chromium at 1400x900 and 640x400 (200% zoom)",
+    "zero outbound requests and no executable markup from hostile HTML",
+    "late hook results fenced and their failures recorded as sanitized events",
+    "atom targets and calculation references bound to their own occurrence evidence; exact rendered targets require frozen-to-original context correspondence (synthetic adversarial fixtures)",
+    "rendered-source navigation fenced in Chromium for both response orders, stale failures and task changes",
+    "Markdown parser progress on literal hash lines within tight work and node budgets",
+    "one check control per assigned atom in atomic mode, with a caller-defined task noun"
+  ],
+  "unverified": [
+    "human usability and reviewer effort (no pilot run)",
+    "assistive technology with a real screen reader",
+    "real-corpus HTML/PDF originals (only synthetic fixtures were rendered)",
+    "hosted CI and release publishing for this version"
+  ]
+}
