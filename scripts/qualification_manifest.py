@@ -80,6 +80,12 @@ def build_manifest(root, verification, coverage, tests_passed, source_tree):
             "author's support declaration shown in atom rows, the calculation card and the evidence pane as the "
             "author's, never checking a row, counting as a citation or changing evidence state or the verified-"
             "verdict gate (synthetic, Chromium)",
+            "exact line targets for normalized_snapshot and faithful_markdown proven by re-deriving the canonical "
+            "derivative from frozen text; rehashed or relabelled derivatives refused at the validator, open_review "
+            "and per request (synthetic adversarial fixtures)",
+            "table header context from an occupied-cell grid honouring rowspan/colspan, explicit headers and scope, "
+            "nested tables isolated, ambiguous associations shown as unavailable in visible and accessible text "
+            "(Chromium)",
         ],
         "unverified": [
             "human usability and reviewer effort (no pilot run)",
