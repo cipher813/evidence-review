@@ -116,7 +116,7 @@ function matchesSubmitted(candidate, assessor) {
   const prior = state.submissions?.[String(state.last_submission)];
   return prior && prior.complete && prior.bundle_hash === state.bundle_hash && prior.assessor === assessor
     && !differences(candidate, { judgments: prior.judgments, defects: prior.defects,
-      annotations: prior.annotations }).length;
+      annotations: prior.annotations, worksheets: prior.worksheets }).length;
 }
 function requiredFieldsOnly() {
   return evidence.presentation?.required_fields_only === true;
@@ -144,6 +144,7 @@ function status() {
     : "Continuation not started · nothing submitted yet";
   $("next").disabled =
     !matchesSubmitted(answers, $("assessor").value.trim()) || hook.status !== "succeeded";
+  showWorksheetResults();
 }
 function logEvent(kind, subject = "") {
   // Navigation is recorded as exposure only; it never marks evidence verified.
@@ -179,6 +180,8 @@ function differences(mine, saved) {
   // Saved records omit an empty annotation list; absence and [] are the same answer.
   if (JSON.stringify(canonical(mine.annotations || [])) !== JSON.stringify(canonical(saved.annotations || [])))
     out.push("Answer annotations");
+  if (JSON.stringify(worksheetInputs(mine)) !== JSON.stringify(worksheetInputs(saved)))
+    out.push("Calculation worksheets");
   return out;
 }
 async function showConflict(message) {
@@ -505,6 +508,13 @@ function showSubject(item, id, follow = true) {
     $("evidence").append(
       el("p", "No cited evidence; search the frozen sources."),
     );
+  if (id) {
+    // Starts from a copy of any supplied formula; the supplied calculation is never edited.
+    const worksheet = el("button", "Start a reviewer worksheet for this item");
+    const kind = bundle.claims.some((c) => c.claim_id === id) ? "claim" : "reference";
+    worksheet.onclick = () => addWorksheet({ kind, id }, item.calculation);
+    $("evidence").append(worksheet);
+  }
   authorDeclarations(id ? [id] : [], $("evidence"));
 }
 // The author's declared support status: shown beside the evidence, never as support or as a citation.
@@ -679,6 +689,9 @@ function showCalculation(span, anchor) {
   authorDeclarations(span.claim_ids, card);
   const preview = el("button", "Preview calculation evidence");
   preview.onclick = () => showSpan(span, false);
+  const worksheet = el("button", "Recompute in a reviewer worksheet");
+  worksheet.onclick = () => addWorksheet({ kind: "span", id: span.span_id }, span.calculation);
+  card.append(worksheet);
   const close = el("button", "Close calculation details"); close.onclick = () => { card.remove(); anchor.focus(); };
   card.append(preview, close); anchor.after(card);
   logEvent("span_opened", span.span_id);
@@ -1343,11 +1356,211 @@ function renderDefects() {
     const remove = el("button", "Remove defect");
     remove.onclick = () => {
       answers.defects.splice(i, 1);
+      // A worksheet about this defect keeps its calculation and loses only the link.
+      (answers.worksheets || []).forEach((w) => {
+        if (w.subject?.kind === "defect" && w.subject.id === d.defect_id) w.subject = null;
+      });
       renderDefects();
       save();
     };
     div.append(remove);
     $("defects").append(div);
+  });
+  renderWorksheets();
+}
+// ---- Reviewer-authored calculation worksheets (reviewer-calculation-worksheet/v1).
+// Separate from candidate and prepared calculations: a worksheet never edits a
+// supplied formula, and its server-derived arithmetic never decides support.
+function worksheetInputs(a) {
+  return canonical((a?.worksheets || []).map(({ computation, ...inputs }) => inputs));
+}
+function newWorksheetOperand(name, from = {}) {
+  return { name, value: from.value || "", unit: from.unit || "", period: from.period || "",
+    entity: from.entity || "", metric: from.metric || "", availability: "selected",
+    unavailable_reason: "", selections: [] };
+}
+function newWorksheet(subjectRef, from = null) {
+  return { worksheet_id: "W" + crypto.randomUUID(), contract: "reviewer-calculation-worksheet/v1",
+    authorship: "reviewer", subject: subjectRef, formula: from?.formula || "",
+    operands: (from?.operands || []).filter((o) => o.kind !== "constant").map((o) => newWorksheetOperand(o.name, o)),
+    reported_value: from?.result || "", unit: from?.unit || "", tolerance: from?.tolerance || "0",
+    rationale: "", reviewer_support: "unknown" };
+}
+function addWorksheet(subjectRef, from = null) {
+  (answers.worksheets ||= []).push(newWorksheet(subjectRef, from));
+  renderWorksheets();
+  save();
+  const all = document.querySelectorAll("#worksheets .worksheet");
+  all[all.length - 1]?.querySelector("input")?.focus();
+}
+function worksheetSubjects() {
+  const out = [];
+  bundle.claims.forEach((c) => out.push({ kind: "claim", id: c.claim_id, label: `Claim ${c.claim_id}: ${short(c.text, 60)}` }));
+  bundle.references.forEach((r) => out.push({ kind: "reference", id: r.reference_id, label: `Reference ${r.reference_id}: ${short(r.text, 60)}` }));
+  bundle.spans.filter((n) => n.state !== "identifier").forEach((n) =>
+    out.push({ kind: "span", id: n.span_id, label: `Number ${n.text} (${n.field_path})` }));
+  answers.defects.forEach((d, i) => out.push({ kind: "defect", id: d.defect_id, label: `Defect ${i + 1}${d.category ? ": " + d.category : ""}` }));
+  return out;
+}
+function suppliedCalculation(ref) {
+  if (!ref) return null;
+  if (ref.kind === "claim") return bundle.claims.find((c) => c.claim_id === ref.id)?.calculation || null;
+  if (ref.kind === "reference") return bundle.references.find((r) => r.reference_id === ref.id)?.calculation || null;
+  if (ref.kind === "span") return bundle.spans.find((n) => n.span_id === ref.id)?.calculation || null;
+  return null;
+}
+function worksheetText(w, label, key, box, aria = label) {
+  const l = el("label", label + " ");
+  const input = el("input");
+  input.setAttribute("aria-label", aria);
+  input.value = w[key];
+  input.oninput = () => { w[key] = input.value; showWorksheetResults(); save(); };
+  l.append(input); box.append(l);
+  return input;
+}
+function renderWorksheets() {
+  const box = $("worksheets");
+  if (!box) return;
+  box.replaceChildren();
+  (answers.worksheets || []).forEach((w, i) => {
+    const n = i + 1, div = el("div");
+    div.className = "worksheet";
+    div.dataset.worksheet = w.worksheet_id;
+    div.setAttribute("role", "group");
+    div.setAttribute("aria-label", `Worksheet ${n}`);
+    div.append(el("h4", `Worksheet ${n} · reviewer-authored calculation`));
+    const subjectLabel = el("label", "About ");
+    const pick = el("select");
+    pick.setAttribute("aria-label", `Worksheet ${n} subject`);
+    pick.append(new Option("Choose what this calculation checks…", ""));
+    const choices = worksheetSubjects();
+    if (w.subject && !choices.some((c) => c.kind === w.subject.kind && c.id === w.subject.id))
+      choices.push({ ...w.subject, label: `${w.subject.kind} ${w.subject.id}` });
+    choices.forEach((c) => pick.append(new Option(c.label, c.kind + "\u0000" + c.id)));
+    pick.value = w.subject ? w.subject.kind + "\u0000" + w.subject.id : "";
+    pick.onchange = () => {
+      const [kind, id] = pick.value.split("\u0000");
+      w.subject = pick.value ? { kind, id } : null;
+      renderWorksheets(); save();
+    };
+    subjectLabel.append(pick); div.append(subjectLabel);
+    const supplied = suppliedCalculation(w.subject);
+    div.append(el("p", supplied
+      ? `Supplied formula (candidate, unchanged): ${supplied.formula} → reported ${supplied.result} ${supplied.unit}`.trim()
+      : "No supplied formula for this subject."));
+    worksheetText(w, "Formula", "formula", div, `Worksheet ${n} formula`);
+    div.append(el("small", "Use operand names, numbers, + − × ÷ (as + - * /) and parentheses."));
+    w.operands.forEach((o, j) => {
+      const row = el("fieldset");
+      row.className = "worksheet-operand";
+      const legend = el("legend", `Operand ${o.name || j + 1}`);
+      row.append(legend);
+      for (const [key, label] of [["name", "name"], ["value", "value"], ["unit", "unit"], ["period", "period"],
+                                  ["entity", "entity"], ["metric", "metric"]]) {
+        const input = worksheetText(o, label, key, row, `Worksheet ${n} operand ${j + 1} ${label}`);
+        if (key === "name") input.addEventListener("input", () => { legend.textContent = `Operand ${o.name || j + 1}`; });
+        if (key === "value") input.disabled = o.availability === "unavailable";
+      }
+      const availability = el("select");
+      availability.setAttribute("aria-label", `Worksheet ${n} operand ${j + 1} availability`);
+      availability.append(new Option("Value from source passages", "selected"), new Option("Unavailable in the sources", "unavailable"));
+      availability.value = o.availability;
+      availability.onchange = () => {
+        o.availability = availability.value;
+        if (o.availability === "unavailable") { o.value = ""; o.selections = []; }
+        renderWorksheets(); save();
+      };
+      row.append(availability);
+      if (o.availability === "unavailable") {
+        worksheetText(o, "Why unavailable", "unavailable_reason", row, `Worksheet ${n} operand ${j + 1} unavailable reason`);
+      } else {
+        const attach = el("button", "Attach selected passage");
+        attach.type = "button";
+        attach.setAttribute("aria-label", `Attach selected passage to worksheet ${n} operand ${j + 1}`);
+        attach.onclick = () => {
+          if (!selection) { $("status").textContent = "Select source lines first, then attach them."; return; }
+          o.selections.push(structuredClone(selection));
+          renderWorksheets(); save();
+        };
+        row.append(attach);
+        o.selections.forEach((sel, k) => {
+          const p = el("p", `${sel.source_id} L${sel.start_line}–L${sel.end_line}: ${sel.excerpt}`);
+          const drop = el("button", "Remove passage");
+          drop.type = "button";
+          drop.setAttribute("aria-label", `Remove passage ${k + 1} from worksheet ${n} operand ${j + 1}`);
+          drop.onclick = () => { o.selections.splice(k, 1); renderWorksheets(); save(); };
+          p.append(drop); row.append(p);
+        });
+        if (!o.selections.length) row.append(el("p", "No source passage attached."));
+      }
+      const removeOperand = el("button", "Remove operand");
+      removeOperand.type = "button";
+      removeOperand.setAttribute("aria-label", `Remove worksheet ${n} operand ${j + 1}`);
+      removeOperand.onclick = () => { w.operands.splice(j, 1); renderWorksheets(); save(); };
+      row.append(removeOperand);
+      div.append(row);
+    });
+    const addOperand = el("button", "Add operand");
+    addOperand.type = "button";
+    addOperand.setAttribute("aria-label", `Add operand to worksheet ${n}`);
+    addOperand.onclick = () => {
+      let k = w.operands.length + 1;
+      while (w.operands.some((o) => o.name === "input" + k)) k++;
+      w.operands.push(newWorksheetOperand("input" + k));
+      renderWorksheets(); save();
+    };
+    div.append(addOperand);
+    worksheetText(w, "Reported value", "reported_value", div, `Worksheet ${n} reported value`);
+    worksheetText(w, "Unit", "unit", div, `Worksheet ${n} unit`);
+    worksheetText(w, "Absolute tolerance", "tolerance", div, `Worksheet ${n} tolerance`);
+    const result = el("output");
+    result.className = "worksheet-result";
+    result.setAttribute("aria-live", "polite");
+    result.setAttribute("aria-label", `Worksheet ${n} result`);
+    div.append(result);
+    const rationale = el("textarea");
+    rationale.setAttribute("aria-label", `Worksheet ${n} rationale`);
+    rationale.placeholder = "What this calculation checks and why these inputs";
+    rationale.value = w.rationale;
+    rationale.oninput = () => { w.rationale = rationale.value; save(); };
+    div.append(rationale);
+    const support = el("select");
+    support.setAttribute("aria-label", `Worksheet ${n} reviewer support judgment`);
+    support.append(new Option("Support: unknown (not decided by arithmetic)", "unknown"),
+      new Option("Support: supported", "supported"), new Option("Support: unsupported", "unsupported"));
+    support.value = w.reviewer_support;
+    support.onchange = () => { w.reviewer_support = support.value; save(); };
+    div.append(support);
+    const remove = el("button", "Remove worksheet");
+    remove.type = "button";
+    remove.setAttribute("aria-label", `Remove worksheet ${n}`);
+    remove.onclick = () => { answers.worksheets.splice(i, 1); renderWorksheets(); save(); };
+    div.append(remove);
+    box.append(div);
+  });
+  showWorksheetResults();
+}
+function describeComputation(c) {
+  if (!c) return "Not yet recomputed.";
+  if (c.status === "computed") {
+    const compared = c.comparison === "not_compared" ? "no reported value compared"
+      : `reported value ${c.comparison} · discrepancy ${c.discrepancy}`;
+    return `Recomputed (Decimal): ${c.result} · ${compared}`;
+  }
+  return { calculation_error: "Calculation error: ", incomplete: "Incomplete: ", invalid: "Not computed: " }[c.status] + c.reason;
+}
+function showWorksheetResults() {
+  const saved = new Map((state?.answers?.worksheets || []).map((w) => [w.worksheet_id, w]));
+  document.querySelectorAll("#worksheets .worksheet").forEach((div) => {
+    const out = div.querySelector(".worksheet-result");
+    const mine = (answers.worksheets || []).find((w) => w.worksheet_id === div.dataset.worksheet);
+    const theirs = saved.get(div.dataset.worksheet);
+    const current = mine && theirs &&
+      JSON.stringify(worksheetInputs({ worksheets: [mine] })) === JSON.stringify(worksheetInputs({ worksheets: [theirs] }));
+    out.textContent = current
+      ? describeComputation(theirs.computation) + " · Reviewer arithmetic; it does not establish support."
+      : "Not recomputed yet: these inputs are not saved (see save status).";
+    out.dataset.status = current ? theirs.computation.status : "unsaved";
   });
 }
 // ---- answer-annotation/v1: reviewer-selected exact text in an original answer field.
@@ -1616,6 +1829,7 @@ async function load() {
   answers.annotations ||= [];
   answerSelection = null;
   $("answer-selection").textContent = "No answer text selected.";
+  answers.worksheets ||= [];
   revealedFields.clear();
   $("assessor").value =
     state.assessor ||
@@ -1648,6 +1862,10 @@ $("add-defect").onclick = () => {
   save();
 };
 $("add-annotation").onclick = annotateSelection;
+$("add-worksheet").onclick = () => {
+  const claim = subject && bundle.claims.some((c) => c.claim_id === subject) ? { kind: "claim", id: subject } : null;
+  addWorksheet(claim);
+};
 $("submit").onclick = () => save(true).catch(() => {});
 $("reconcile").onclick = () => {
   queue = queue

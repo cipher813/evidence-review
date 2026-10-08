@@ -584,6 +584,96 @@ class Defect(Strict):
         return data
 
 
+WORKSHEET_CONTRACT = "reviewer-calculation-worksheet/v1"
+SUBJECT_KINDS = ("claim", "reference", "span", "defect", "annotation")
+
+
+class SubjectRef(Strict):
+    """What a reviewer record is about: a bundle claim, reference or numeric span,
+    a defect in the same answers, or an answer annotation (by ``annotation_id``)."""
+    kind: Literal["claim", "reference", "span", "defect", "annotation"]
+    id: str = Field(min_length=1, max_length=200)
+
+
+class WorksheetOperand(Strict):
+    """One reviewer-entered input. ``selected`` inputs carry their source passages;
+    ``unavailable`` inputs carry no value and say why (retained, never filled in)."""
+    name: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
+    value: str = Field(default="", max_length=200)
+    unit: str = ""
+    period: str = ""
+    entity: str = ""
+    metric: str = ""
+    availability: Literal["selected", "unavailable"] = "selected"
+    unavailable_reason: str = ""
+    selections: list[Selection] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def explicit_state(self):
+        import keyword
+
+        if keyword.iskeyword(self.name):
+            raise ValueError("operand name is a reserved word")
+        # Non-finite values raise; unparseable text is retained as an input error.
+        finite_decimal(self.value, "operand " + self.name)
+        if self.availability == "unavailable" and (self.value or self.selections):
+            raise ValueError("an unavailable operand carries no value or source selection")
+        return self
+
+
+def finite_decimal(text, what):
+    """True for a finite decimal, None for empty, False for unparseable text.
+
+    Non-finite values (NaN, Infinity) are refused outright."""
+    if text == "":
+        return None
+    try:
+        value = Decimal(text.strip())
+    except InvalidOperation:
+        return False
+    if not value.is_finite():
+        raise ValueError(f"{what}: non-finite value refused")
+    return True
+
+
+class CalculationWorksheet(Strict):
+    """A reviewer-authored calculation, kept apart from candidate and prepared ones.
+
+    It never replaces a bundle formula. ``computation`` is derived on every
+    validation with the package's bounded Decimal evaluator, so a client cannot
+    supply its own result; arithmetic never sets ``reviewer_support``."""
+    worksheet_id: str = Field(pattern=r"^[A-Za-z0-9_.:-]{1,120}$")
+    contract: Literal["reviewer-calculation-worksheet/v1"] = "reviewer-calculation-worksheet/v1"
+    authorship: Literal["reviewer"] = "reviewer"
+    subject: SubjectRef | None = None
+    formula: str = Field(default="", max_length=1000)
+    operands: list[WorksheetOperand] = Field(default_factory=list, max_length=50)
+    reported_value: str = Field(default="", max_length=200)
+    unit: str = ""
+    tolerance: str = Field(default="0", max_length=200)
+    rationale: str = ""
+    # The reviewer's own support judgment for the subject; never inferred from arithmetic.
+    reviewer_support: Literal["unknown", "supported", "unsupported"] = "unknown"
+    computation: dict = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def recompute(self):
+        from .evidence import formula_names, worksheet_computation
+
+        names = [o.name for o in self.operands]
+        if len(set(names)) != len(names):
+            raise ValueError("duplicate worksheet operand")
+        for text, what in ((self.reported_value, "reported value"), (self.tolerance, "tolerance")):
+            finite_decimal(text, what)
+        if self.formula.strip():
+            try:
+                formula_names(self.formula)  # unsafe constructs raise and are never stored
+            except SyntaxError:
+                pass  # an incomplete expression is retained as an input error
+        self.computation = worksheet_computation(self)
+        return self
+
+
 class ReviewSubmission(Strict):
     schema_version: Literal["review-submission/v1"] = "review-submission/v1"
     bundle_id: str
@@ -596,6 +686,9 @@ class ReviewSubmission(Strict):
     session_seconds: float = Field(ge=0)
     judgments: dict[str, Judgment]
     defects: list[Defect]
+    # Reviewer-authored calculations (optional); omitted when empty so earlier
+    # submissions serialize and hash exactly as they did.
+    worksheets: list[CalculationWorksheet] = Field(default_factory=list)
     complete: Literal[True]
     amendment_reason: str = ""
     provenance: dict[str, str]
@@ -608,6 +701,8 @@ class ReviewSubmission(Strict):
         # Absent annotations keep the exact canonical bytes of earlier submissions.
         if not self.annotations:
             data.pop("annotations", None)
+        if not self.worksheets:
+            data.pop("worksheets", None)
         return data
 
 

@@ -126,6 +126,96 @@
       "title": "AnswerRange",
       "type": "object"
     },
+    "CalculationWorksheet": {
+      "additionalProperties": false,
+      "description": "A reviewer-authored calculation, kept apart from candidate and prepared ones.\n\nIt never replaces a bundle formula. ``computation`` is derived on every\nvalidation with the package's bounded Decimal evaluator, so a client cannot\nsupply its own result; arithmetic never sets ``reviewer_support``.",
+      "properties": {
+        "worksheet_id": {
+          "pattern": "^[A-Za-z0-9_.:-]{1,120}$",
+          "title": "Worksheet Id",
+          "type": "string"
+        },
+        "contract": {
+          "const": "reviewer-calculation-worksheet/v1",
+          "default": "reviewer-calculation-worksheet/v1",
+          "title": "Contract",
+          "type": "string"
+        },
+        "authorship": {
+          "const": "reviewer",
+          "default": "reviewer",
+          "title": "Authorship",
+          "type": "string"
+        },
+        "subject": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SubjectRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "formula": {
+          "default": "",
+          "maxLength": 1000,
+          "title": "Formula",
+          "type": "string"
+        },
+        "operands": {
+          "items": {
+            "$ref": "#/$defs/WorksheetOperand"
+          },
+          "maxItems": 50,
+          "title": "Operands",
+          "type": "array"
+        },
+        "reported_value": {
+          "default": "",
+          "maxLength": 200,
+          "title": "Reported Value",
+          "type": "string"
+        },
+        "unit": {
+          "default": "",
+          "title": "Unit",
+          "type": "string"
+        },
+        "tolerance": {
+          "default": "0",
+          "maxLength": 200,
+          "title": "Tolerance",
+          "type": "string"
+        },
+        "rationale": {
+          "default": "",
+          "title": "Rationale",
+          "type": "string"
+        },
+        "reviewer_support": {
+          "default": "unknown",
+          "enum": [
+            "unknown",
+            "supported",
+            "unsupported"
+          ],
+          "title": "Reviewer Support",
+          "type": "string"
+        },
+        "computation": {
+          "additionalProperties": true,
+          "title": "Computation",
+          "type": "object"
+        }
+      },
+      "required": [
+        "worksheet_id"
+      ],
+      "title": "CalculationWorksheet",
+      "type": "object"
+    },
     "Defect": {
       "additionalProperties": false,
       "properties": {
@@ -275,6 +365,98 @@
       ],
       "title": "Selection",
       "type": "object"
+    },
+    "SubjectRef": {
+      "additionalProperties": false,
+      "description": "What a reviewer record is about: a bundle claim, reference or numeric span,\na defect in the same answers, or an answer annotation (by ``annotation_id``).",
+      "properties": {
+        "kind": {
+          "enum": [
+            "claim",
+            "reference",
+            "span",
+            "defect",
+            "annotation"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "title": "SubjectRef",
+      "type": "object"
+    },
+    "WorksheetOperand": {
+      "additionalProperties": false,
+      "description": "One reviewer-entered input. ``selected`` inputs carry their source passages;\n``unavailable`` inputs carry no value and say why (retained, never filled in).",
+      "properties": {
+        "name": {
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$",
+          "title": "Name",
+          "type": "string"
+        },
+        "value": {
+          "default": "",
+          "maxLength": 200,
+          "title": "Value",
+          "type": "string"
+        },
+        "unit": {
+          "default": "",
+          "title": "Unit",
+          "type": "string"
+        },
+        "period": {
+          "default": "",
+          "title": "Period",
+          "type": "string"
+        },
+        "entity": {
+          "default": "",
+          "title": "Entity",
+          "type": "string"
+        },
+        "metric": {
+          "default": "",
+          "title": "Metric",
+          "type": "string"
+        },
+        "availability": {
+          "default": "selected",
+          "enum": [
+            "selected",
+            "unavailable"
+          ],
+          "title": "Availability",
+          "type": "string"
+        },
+        "unavailable_reason": {
+          "default": "",
+          "title": "Unavailable Reason",
+          "type": "string"
+        },
+        "selections": {
+          "items": {
+            "$ref": "#/$defs/Selection"
+          },
+          "title": "Selections",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "WorksheetOperand",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -333,6 +515,13 @@
         "$ref": "#/$defs/Defect"
       },
       "title": "Defects",
+      "type": "array"
+    },
+    "worksheets": {
+      "items": {
+        "$ref": "#/$defs/CalculationWorksheet"
+      },
+      "title": "Worksheets",
       "type": "array"
     },
     "complete": {
