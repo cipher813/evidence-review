@@ -42,6 +42,20 @@ AMBIGUOUS = """<table><thead><tr><th>Metric</th><th colspan="2">Retail</th></tr>
 <tr><th></th><th colspan="2">FY2025</th></tr>
 <tr><th></th><th>FY2025</th><th>FY2026</th></tr></thead>
 <tbody><tr><th>Operating margin</th><td colspan="2">22.8%</td></tr></tbody></table>"""
+# Explicit headers= naming a rowgroup header ABOVE the target row in the same tbody: its declared scope makes
+# it a row header, though geometry alone would read it as a column header (I12170 P3).
+EXPLICIT_ROWGROUP = """<table><thead><tr><th>Metric</th><th id="fy25">FY2025</th></tr></thead>
+<tbody><tr><th scope="rowgroup" id="retail" colspan="2">Retail</th></tr>
+<tr><th id="margin">Operating margin</th><td headers="retail margin fy25">22.8%</td></tr></tbody></table>"""
+# Its column counterpart: a colgroup header named explicitly stays a column header.
+EXPLICIT_COLGROUP = """<table><thead><tr><th>Metric</th><th scope="colgroup" colspan="2" id="retail">Retail</th></tr>
+<tr><th></th><th scope="col" id="fy25">FY2025</th><th scope="col" id="fy26">FY2026</th></tr></thead>
+<tbody><tr><th scope="row" id="margin">Operating margin</th><td headers="retail fy25 margin">22.8%</td>
+<td headers="retail fy26 margin">24.6%</td></tr></tbody></table>"""
+# Explicit headers naming header cells with no scope at all (td cells, which nothing infers a scope for):
+# geometry decides, so the one above heads the column and the one in the cell's own row heads the row.
+EXPLICIT_NO_SCOPE = """<table><tbody><tr><td>Metric</td><td id="fy25">FY2025</td></tr>
+<tr><td id="margin">Operating margin</td><td headers="fy25 margin">22.8%</td></tr></tbody></table>"""
 MISSING = """<table><tbody><tr><td>Metric</td><td>Value</td></tr>
 <tr><td>Operating margin</td><td headers="nowhere">22.8%</td></tr></tbody></table>"""
 
@@ -119,6 +133,34 @@ def test_explicit_headers_attribute_wins_over_grid_position(tmp_path, browser):
         assert "Column: FY2026" in text, text
         assert "Row: Operating margin" in text
         assert "FY2025" not in text
+        page.close()
+
+
+def test_explicit_rowgroup_header_above_the_row_is_a_row_header(tmp_path, browser):
+    with review(tmp_path, EXPLICIT_ROWGROUP) as h:
+        page = browser.new_page()
+        hit, text = open_cell(page, h, "22.8%")
+        assert "Column: FY2025" in text and "Column: FY2025 /" not in text, text
+        assert "Row: Retail / Operating margin" in text, text
+        page.close()
+
+
+def test_explicit_colgroup_header_stays_a_column_header(tmp_path, browser):
+    with review(tmp_path, EXPLICIT_COLGROUP, "Operating margin 22.8% 24.6%") as h:
+        page = browser.new_page()
+        _, text = open_cell(page, h, "22.8%")
+        assert "Column: Retail / FY2025" in text, text
+        assert "Row: Operating margin" in text and "Row: Retail" not in text, text
+        assert "FY2026" not in text, text
+        page.close()
+
+
+def test_explicit_header_without_scope_falls_back_to_geometry(tmp_path, browser):
+    with review(tmp_path, EXPLICIT_NO_SCOPE) as h:
+        page = browser.new_page()
+        _, text = open_cell(page, h, "22.8%")
+        assert "Column: FY2025" in text, text
+        assert "Row: Operating margin" in text, text
         page.close()
 
 

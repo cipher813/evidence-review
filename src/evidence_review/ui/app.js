@@ -1875,10 +1875,18 @@ function cellHeaders(cell, table, heads) {
     }
     const found = explicit.map((id) => byId.get(id));
     if (found.some((c) => !c)) return { column: UNAVAILABLE, row: UNAVAILABLE };
-    // A header whose rows overlap the cell's heads its row; one above (or below) it heads its column.
+    // A declared scope decides first: row/rowgroup heads the cell's row, col/colgroup its column (so a
+    // rowgroup header above the cell is still a row header). Only without a valid scope does geometry
+    // decide: a header whose rows overlap the cell's heads its row; one above (or below) it heads its column.
     const overlaps = (c) => at.get(c).row < pos.row + pos.rows && pos.row < at.get(c).row + at.get(c).rows;
-    const colHeads = found.filter((c) => !overlaps(c)).sort(before);
-    const rowHeads = found.filter(overlaps).sort(before);
+    const isRowHead = (c) => {
+      const declared = (c.getAttribute("scope") || "").toLowerCase();
+      if (declared === "row" || declared === "rowgroup") return true;
+      if (declared === "col" || declared === "colgroup") return false;
+      return overlaps(c);
+    };
+    const colHeads = found.filter((c) => !isRowHead(c)).sort(before);
+    const rowHeads = found.filter(isRowHead).sort(before);
     return { column: colHeads.length ? headerNames(colHeads) : UNAVAILABLE,
       row: rowHeads.length ? headerNames(rowHeads) : UNAVAILABLE };
   }
