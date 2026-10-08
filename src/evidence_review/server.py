@@ -13,7 +13,7 @@ from urllib.parse import urlsplit, parse_qsl
 import re
 from .atomic_evidence import (ATOM_EVIDENCE_SCHEMA, RENDER_MANIFEST_SCHEMA, atom_view, build_atom_manifest,
                               validate_atom_evidence)
-from .contracts import (ANSWER_ANNOTATION_CONTRACT, OFFSET_UNIT, ReviewWorkload, PACKAGE_VERSION, blind_terms,
+from .contracts import (ANSWER_ANNOTATION_CONTRACT, OFFSET_UNIT, WORKSHEET_CONTRACT, ReviewWorkload, PACKAGE_VERSION, blind_terms,
                         blind_violations, digest, documents_digest, validate_bundle)
 from .source_rendering import (DERIVATIVE_SCHEMA, RenderedSourceAsset, render_frozen_text,
                                validate_render_asset)
@@ -37,7 +37,7 @@ EVENT_KINDS = {
 ATOMIC_SOURCE_CHECK = "atomic-source-check/v1"
 PRESENTATION_MODES = ("default", ATOMIC_SOURCE_CHECK)
 CONTRACTS = ("review-bundle/v1", "review-submission/v1", ATOM_EVIDENCE_SCHEMA, RENDER_MANIFEST_SCHEMA,
-             DERIVATIVE_SCHEMA, ANSWER_ANNOTATION_CONTRACT)
+             DERIVATIVE_SCHEMA, ANSWER_ANNOTATION_CONTRACT, WORKSHEET_CONTRACT)
 
 
 def answer_annotation_binding(bundle):

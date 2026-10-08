@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-from evidence_review import FileStore, answer_range, export_json
+from evidence_review import FileStore, answer_range, capabilities, export_json
 from evidence_review.contracts import AnswerAnnotation
 from evidence_review.store import subject_ids, validate_answers
 from test_reviewer_worksheet import answers, revenue_worksheet, worksheet_bundle
@@ -77,3 +77,7 @@ def test_removing_a_linked_annotation_is_refused_until_the_link_is_dropped(tmp_p
     state = store.save_snapshot(b, 1, "unlinked", unlinked, "Ada")
     assert "annotations" not in state["answers"]
     assert state["answers"]["worksheets"][0]["formula"] == revenue_worksheet(b)["formula"]
+
+
+def test_both_reviewer_contracts_are_negotiable():
+    assert {"answer-annotation/v1", "reviewer-calculation-worksheet/v1"} <= set(capabilities()["contracts"])
