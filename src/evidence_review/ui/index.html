@@ -53,7 +53,12 @@
         <h3>Defects</h3>
         <p>Support choices do not automatically create a defect. Use Add defect for each verified problem, attach evidence, and decide materiality using the task rubric. Review completion confirms that all identified material defects have been recorded.</p>
         <div id="defects"></div>
-        <button id="add-defect" type="button">Add defect</button
+        <button id="add-defect" type="button">Add defect</button>
+        <h3>Answer annotations</h3>
+        <p>Select exact text in the answer under review, then annotate it as supported, defective, cannot verify or incomplete. Annotations record only the passages you choose: they are not an exhaustive review, and an unannotated passage is not thereby supported. Record an omission as a defect without answer text.</p>
+        <p id="answer-selection" role="status" aria-live="polite" aria-label="Selected answer text">No answer text selected.</p>
+        <div id="annotations" aria-label="Answer annotations"></div>
+        <button id="add-annotation" type="button">Annotate selected answer text</button
         ><label>Amendment reason <input id="amendment" /></label
         ><button id="submit" type="button">Submit review</button
         ><button id="reconcile" type="button">Reconcile continuation</button

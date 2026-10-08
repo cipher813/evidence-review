@@ -148,9 +148,13 @@ pre,
   background: #d9edff;
 }
 .field,
-.defect {
+.defect,
+.annotation {
   border-top: 1px solid #d3dde5;
   padding: 0.6rem 0;
+}
+.annotated-text mark {
+  outline: 2px solid currentColor;
 }
 .save-error {
   color: #a31a1a;

@@ -29,6 +29,7 @@ let bundle,
   answers,
   queue = Promise.resolve(),
   selection = null,
+  answerSelection = null,
   subject = null,
   current = null,
   revealedFields = new Set(),
@@ -114,7 +115,8 @@ async function api(path, body, signal) {
 function matchesSubmitted(candidate, assessor) {
   const prior = state.submissions?.[String(state.last_submission)];
   return prior && prior.complete && prior.bundle_hash === state.bundle_hash && prior.assessor === assessor
-    && !differences(candidate, { judgments: prior.judgments, defects: prior.defects }).length;
+    && !differences(candidate, { judgments: prior.judgments, defects: prior.defects,
+      annotations: prior.annotations }).length;
 }
 function requiredFieldsOnly() {
   return evidence.presentation?.required_fields_only === true;
@@ -174,6 +176,9 @@ function differences(mine, saved) {
     }
   if (JSON.stringify(canonical(mine.defects)) !== JSON.stringify(canonical(saved.defects)))
     out.push("Defects");
+  // Saved records omit an empty annotation list; absence and [] are the same answer.
+  if (JSON.stringify(canonical(mine.annotations || [])) !== JSON.stringify(canonical(saved.annotations || [])))
+    out.push("Answer annotations");
   return out;
 }
 async function showConflict(message) {
@@ -700,7 +705,7 @@ function numberAction(s, verificationControls = true) {
   if (verification) fragment.className = "quantity-token";
   fragment.append(b);
   if (verification) {
-    const label = el("label"); label.className = "quantity-check";
+    const label = el("label"); label.className = "quantity-check"; label.dataset.notAnswer = "";
     const check = el("input"); check.type = "checkbox";
     check.dataset.quantityField = verification.field_id;
     check.checked = answers.judgments[verification.field_id]?.value === true;
@@ -716,7 +721,7 @@ function numberAction(s, verificationControls = true) {
     label.append(check); fragment.prepend(label);
   }
   if (direct) {
-    const preview = el("button", "Preview evidence"); preview.className = "preview-link";
+    const preview = el("button", "Preview evidence"); preview.className = "preview-link"; preview.dataset.notAnswer = "";
     preview.setAttribute("aria-label", "Preview evidence for " + s.text);
     preview.onclick = () => showSpan(s, false); fragment.append(preview);
   }
@@ -726,6 +731,7 @@ function linkedStatement(text, subjectId, verificationControls = !atomicMode()) 
   const wrap = el("blockquote"); wrap.className = "item-text";
   const field = bundle.fields.find((f) => f.role !== "context" && f.text === text && f.claim_ids.includes(subjectId));
   if (!field) { wrap.textContent = text; return wrap; }
+  wrap.dataset.fieldPath = field.path;
   let at = 0; const chars = Array.from(text);
   bundle.spans.filter((s) => s.field_path === field.path).sort((a,b) => a.start-b.start).forEach((s) => {
     // Atomic mode owns each atom's one check control in its row; statement context here is read-only.
@@ -909,6 +915,7 @@ function renderReport() {
     });
     p.append(document.createTextNode(chars.slice(offset).join("")));
     p.dataset.savedText = f.text;
+    p.dataset.fieldPath = f.path;
     p.dataset.claimIds = JSON.stringify(f.claim_ids || []);
     report.append(p);
   });
@@ -1308,6 +1315,31 @@ function renderDefects() {
         el("p", `${s.source_id} L${s.start_line}–L${s.end_line}: ${s.excerpt}`),
       ),
     );
+    const answerAttach = el("button", "Attach selected answer text to defect");
+    answerAttach.onclick = () => {
+      if (!answerSelection) {
+        $("status").textContent = "Select exact text in an answer field first.";
+        return;
+      }
+      d.answer_ranges = [...(d.answer_ranges || []), structuredClone(answerSelection)];
+      renderDefects();
+      save();
+    };
+    div.append(answerAttach);
+    if (!(d.answer_ranges || []).length)
+      div.append(el("small", "No answer passage attached: this records an omission or a whole-answer defect."));
+    (d.answer_ranges || []).forEach((r, k) => {
+      div.append(rangeInContext(r));
+      const drop = el("button", "Remove answer text");
+      drop.onclick = () => {
+        d.answer_ranges.splice(k, 1);
+        // An empty list is the legacy shape; never store it.
+        if (!d.answer_ranges.length) delete d.answer_ranges;
+        renderDefects();
+        save();
+      };
+      div.append(drop);
+    });
     const remove = el("button", "Remove defect");
     remove.onclick = () => {
       answers.defects.splice(i, 1);
@@ -1317,6 +1349,177 @@ function renderDefects() {
     div.append(remove);
     $("defects").append(div);
   });
+}
+// ---- answer-annotation/v1: reviewer-selected exact text in an original answer field.
+// Offsets are Unicode code points (Array.from), identical to Python str indexing;
+// the store re-validates field, document digests, bounds and exact text.
+const DISPOSITIONS = [
+  ["supported", "Supported by the sources"],
+  ["defective", "Defective"],
+  ["cannot_verify", "Cannot verify"],
+  ["incomplete", "Incomplete"],
+];
+const MATERIAL_DISPOSITIONS = ["defective", "incomplete"];
+function codePoints(text) {
+  return Array.from(text).length;
+}
+// Code-point offset of a DOM boundary within one answer host, counting only the
+// answer's own text (never control labels such as "Preview evidence").
+function answerOffset(host, node, offset) {
+  const point = document.createRange();
+  point.setStart(node, offset);
+  point.collapse(true);
+  const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) => n.parentElement.closest("[data-not-answer]") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+  });
+  let count = 0;
+  for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+    if (t === node) {
+      const before = t.data.slice(0, offset);
+      if (/[\uD800-\uDBFF]$/.test(before)) return null; // never split a surrogate pair
+      return count + codePoints(before);
+    }
+    if (point.comparePoint(t, 0) >= 0) return count;
+    count += codePoints(t.data);
+  }
+  return count;
+}
+function answerHost(node) {
+  const element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+  return element?.closest("[data-field-path]") || null;
+}
+function selectedAnswerRange() {
+  const sel = document.getSelection();
+  if (!bundle || !sel || sel.isCollapsed || !sel.rangeCount) return undefined;
+  const range = sel.getRangeAt(0);
+  const host = answerHost(range.startContainer), end = answerHost(range.endContainer);
+  if (!host && !end) return undefined; // a selection elsewhere leaves the last answer selection intact
+  if (!host || host !== end) return { error: "Select text within one answer field." };
+  const field = bundle.fields.find((f) => f.path === host.dataset.fieldPath && f.role !== "context");
+  const binding = evidence.answer_annotation;
+  if (!field || !binding?.fields?.[field.path]) return { error: "That text is not part of an answer under review." };
+  const start = answerOffset(host, range.startContainer, range.startOffset);
+  const stop = answerOffset(host, range.endContainer, range.endOffset);
+  const chars = Array.from(field.text);
+  if (start === null || stop === null || !(start >= 0 && start < stop && stop <= chars.length))
+    return { error: "That selection has no exact answer text." };
+  return {
+    contract: binding.contract,
+    field_path: field.path,
+    start,
+    end: stop,
+    text: chars.slice(start, stop).join(""),
+    offset_unit: binding.offset_unit,
+    field_sha256: binding.fields[field.path],
+    documents_sha256: binding.documents_sha256,
+  };
+}
+function describeRange(r) {
+  const field = bundle.fields.find((f) => f.path === r.field_path);
+  return `${field ? field.label : r.field_path}, characters ${r.start + 1}–${r.end}`;
+}
+document.addEventListener("selectionchange", () => {
+  const picked = selectedAnswerRange();
+  if (picked === undefined) return;
+  const box = $("answer-selection");
+  if (picked.error) {
+    answerSelection = null;
+    box.textContent = picked.error;
+    return;
+  }
+  answerSelection = picked;
+  box.textContent = `Selected answer text (${describeRange(picked)}): “${short(picked.text, 120)}”`;
+});
+// The chosen occurrence in its surroundings, so repeated words are distinguishable.
+function rangeInContext(r) {
+  const field = bundle.fields.find((f) => f.path === r.field_path);
+  const chars = Array.from(field ? field.text : r.text);
+  const quote = el("blockquote");
+  quote.className = "annotated-text";
+  const lead = Math.max(0, r.start - 40), tail = Math.min(chars.length, r.end + 40);
+  const mark = el("mark", r.text);
+  quote.append((lead ? "…" : "") + chars.slice(lead, r.start).join(""), mark,
+    chars.slice(r.end, tail).join("") + (tail < chars.length ? "…" : ""));
+  quote.setAttribute("aria-label", "Annotated answer text: " + describeRange(r));
+  return quote;
+}
+function renderAnnotations() {
+  const list = $("annotations");
+  list.replaceChildren();
+  answers.annotations.forEach((a, i) => {
+    const div = el("div");
+    div.className = "annotation";
+    div.dataset.annotationId = a.annotation_id;
+    div.append(el("h4", `Annotation ${i + 1} · ${describeRange(a.answer_range)}`), rangeInContext(a.answer_range));
+    const disposition = el("select");
+    disposition.setAttribute("aria-label", "Annotation disposition");
+    disposition.append(new Option("Choose disposition…", ""));
+    DISPOSITIONS.forEach(([value, label]) => disposition.append(new Option(label, value)));
+    disposition.value = a.disposition || "";
+    const material = el("select");
+    material.setAttribute("aria-label", "Annotation materiality");
+    material.append(new Option("Choose materiality…", ""), new Option("Nonmaterial", "false"), new Option("Material", "true"));
+    material.value = a.material === null ? "" : String(a.material);
+    const applicable = () => { material.hidden = !MATERIAL_DISPOSITIONS.includes(a.disposition); };
+    disposition.onchange = () => {
+      a.disposition = disposition.value || null;
+      // Materiality is recorded only where a problem is reported.
+      if (!MATERIAL_DISPOSITIONS.includes(a.disposition)) { a.material = null; material.value = ""; }
+      applicable();
+      save();
+    };
+    material.onchange = () => {
+      a.material = material.value === "" ? null : material.value === "true";
+      save();
+    };
+    applicable();
+    const reason = el("textarea");
+    reason.setAttribute("aria-label", "Annotation reason");
+    reason.placeholder = "Reason (required unless supported)";
+    reason.value = a.reason;
+    reason.oninput = () => { a.reason = reason.value; save(); };
+    div.append(disposition, material, reason);
+    const attach = el("button", "Attach selected source passage to annotation");
+    attach.onclick = () => {
+      if (!selection) {
+        $("status").textContent = "Select a passage first: open a source and click its first and last line.";
+        return;
+      }
+      a.selections.push(structuredClone(selection));
+      renderAnnotations();
+      save();
+    };
+    div.append(attach);
+    a.selections.forEach((s, k) => {
+      const line = el("p", `${s.source_id} L${s.start_line}–L${s.end_line}: ${s.excerpt}`);
+      const remove = el("button", "Remove passage");
+      remove.onclick = () => { a.selections.splice(k, 1); renderAnnotations(); save(); };
+      line.append(remove);
+      div.append(line);
+    });
+    const remove = el("button", "Remove annotation");
+    remove.onclick = () => { answers.annotations.splice(i, 1); renderAnnotations(); save(); };
+    div.append(remove);
+    list.append(div);
+  });
+}
+function annotateSelection() {
+  if (!answerSelection) {
+    $("status").textContent = "Select exact text in an answer field first.";
+    return;
+  }
+  answers.annotations.push({
+    contract: answerSelection.contract,
+    annotation_id: "ann:" + crypto.randomUUID(),
+    answer_range: structuredClone(answerSelection),
+    disposition: null,
+    reason: "",
+    material: null,
+    selections: [],
+  });
+  renderAnnotations();
+  save();
+  $("annotations").lastElementChild?.querySelector("select")?.focus();
 }
 function render() {
   $("review-type").textContent = {
@@ -1381,6 +1584,7 @@ function render() {
   if (bundle.task_kind === "reference") referenceEvidenceList(first?.subject_id);
   $("evidence-panel").open = true;
   renderDefects();
+  renderAnnotations();
   $("subjects").replaceChildren();
   [...bundle.claims, ...bundle.references].forEach((c) => {
     const b = el("button", c.text);
@@ -1409,6 +1613,9 @@ async function load() {
   conflicted = false;
   $("conflict").hidden = true;
   answers = structuredClone(state.answers);
+  answers.annotations ||= [];
+  answerSelection = null;
+  $("answer-selection").textContent = "No answer text selected.";
   revealedFields.clear();
   $("assessor").value =
     state.assessor ||
@@ -1440,6 +1647,7 @@ $("add-defect").onclick = () => {
   renderDefects();
   save();
 };
+$("add-annotation").onclick = annotateSelection;
 $("submit").onclick = () => save(true).catch(() => {});
 $("reconcile").onclick = () => {
   queue = queue
@@ -1507,8 +1715,10 @@ document.addEventListener("keydown", (event) => {
       event.preventDefault();
       goTo(target.field_id);
     }
-  } else if (event.key === "Escape" && selection) {
+  } else if (event.key === "Escape" && (selection || answerSelection)) {
     selection = null;
+    answerSelection = null;
+    $("answer-selection").textContent = "No answer text selected.";
     $("status").textContent = "Passage selection cleared.";
   }
 });
@@ -1584,7 +1794,7 @@ function renderAtomicStatements() {
   const rows = evidence.atoms.rows;
   bundle.fields.filter((f) => f.role !== "context").forEach((f) => {
     report.append(el("h3", f.label));
-    const p = el("div"); p.className = "report-text"; p.dataset.savedText = f.text;
+    const p = el("div"); p.className = "report-text"; p.dataset.savedText = f.text; p.dataset.fieldPath = f.path;
     const chars = Array.from(f.text);
     let at = 0;
     rows.filter((r) => r.field_path === f.path).sort((a, b) => a.start - b.start).forEach((r) => {
