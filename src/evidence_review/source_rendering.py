@@ -11,6 +11,15 @@ the text around that node corresponds to the cited frozen line (the same table
 row and header, or the whole cited line), even when the excerpt occurs once.
 Duplicates stay ``ambiguous`` with every candidate, a scanned page without a
 text layer is ``page_only`` at best, and anything unproven is ``unavailable``.
+
+A blank (whitespace-only) frozen line has no rendered node and nothing to
+highlight, so it does not break a line-faithful (Markdown/text) target: the
+target is the nodes of the range's non-blank lines, in order. A range that
+starts or ends on a blank line is trimmed to its non-blank interior (a trimmed
+single table row still narrows to its one matching cell); a range of blank
+lines only stays ``unavailable``. The excerpt must occur in the whole range's
+text with whitespace normalised, exactly as ``evidence.validate_citation``
+checks it against the frozen text.
 Nothing here decides whether a source supports a statement.
 """
 
@@ -254,13 +263,28 @@ def _line_targets(source, citations, line_nodes, cells_by_line, raw_sha):
         base = dict(target_id=target_identity(source.source_id, source.sha256, c.start_line, c.end_line, c.excerpt),
                     source_id=source.source_id, frozen_sha256=source.sha256, raw_sha256=raw_sha,
                     start_line=c.start_line, end_line=c.end_line, excerpt=c.excerpt)
-        if c.end_line > len(lines) or any(n not in line_nodes for n in range(c.start_line, c.end_line + 1)):
+        if c.start_line < 1 or c.end_line > len(lines):
             out.append(RenderedSourceTarget(**base, status="unavailable", reason="Cited lines have no rendered node"))
             continue
-        nodes = list(dict.fromkeys(line_nodes[n] for n in range(c.start_line, c.end_line + 1)))
+        # A blank (whitespace-only) frozen line has no node and nothing to highlight; it never breaks exactness.
+        # Leading and trailing blank lines are trimmed, so the target is the non-blank interior of the range.
+        texted = [n for n in range(c.start_line, c.end_line + 1) if lines[n - 1].strip()]
+        if not texted:
+            out.append(RenderedSourceTarget(**base, status="unavailable",
+                                            reason="Cited lines are blank in the frozen text; nothing to highlight"))
+            continue
+        if any(n not in line_nodes for n in texted):
+            out.append(RenderedSourceTarget(**base, status="unavailable", reason="Cited lines have no rendered node"))
+            continue
+        # The same check as ``evidence.validate_citation``: whitespace, including the blank lines, is normalised.
+        if not excerpt or excerpt not in _norm("\n".join(lines[c.start_line - 1:c.end_line])):
+            out.append(RenderedSourceTarget(**base, status="unavailable",
+                                            reason="Cited excerpt does not occur in the cited frozen lines"))
+            continue
+        nodes = list(dict.fromkeys(line_nodes[n] for n in texted))
         reason = ""
-        if c.start_line == c.end_line and c.start_line in cells_by_line:
-            hits = [cell["id"] for cell in cells_by_line[c.start_line] if excerpt and excerpt in _norm(cell["text"])]
+        if len(texted) == 1 and texted[0] in cells_by_line:
+            hits = [cell["id"] for cell in cells_by_line[texted[0]] if excerpt and excerpt in _norm(cell["text"])]
             if len(hits) == 1:
                 nodes = hits
             elif len(hits) > 1:
@@ -971,6 +995,7 @@ def _check_line_correspondence(manifest, derivative, source):
         if t.status != "exact":
             continue
         for line in range(t.start_line, t.end_line + 1):
+            # A blank frozen line has no canonical node, so a supplied node labelled with it fails the tree check.
             want = canonical_lines.get(line)
             # A separator line maps to its header row and carries no label of its own.
             if want is not None and canonical_by_id[want].get("line") == line \
