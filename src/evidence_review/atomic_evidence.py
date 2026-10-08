@@ -592,6 +592,9 @@ def validate_atom_evidence(bundle, payload, render_manifests=()):
 PREPARED_INPUT_PROVENANCE = ("Independently located for review as one input of this occurrence's own candidate "
                              "calculation; shown beside the original input, which keeps its own status. Not a "
                              "support judgment, and it never checks a row.")
+AUTHOR_DECLARATION_LABEL = "Author's declaration"
+AUTHOR_DECLARATION_PROVENANCE = ("Declared by the author of the answer; not evidence, not a citation and not a "
+                                 "support judgment. It never checks a row or changes any status.")
 PREPARATION_PROVENANCE = ("Independently prepared for review and attributed to this exact occurrence; not "
                           "supplied by the answer, not a support judgment, and it never checks a row.")
 
@@ -602,6 +605,7 @@ def atom_view(bundle, manifest, render_manifests=()):
     cited = {citation_target_id(bundle, c): c for c in bundle_citations(bundle)}
     cited.update({d.target_id: d.citation for d in manifest.citations})
     rendered = {m.source_id for m in render_manifests}
+    claims = {c.claim_id: c for c in bundle.claims}
     rows = []
     for item in manifest.items:
         calc = _calculation_for(bundle, item.calculation_ref)
@@ -653,7 +657,8 @@ def atom_view(bundle, manifest, render_manifests=()):
             tid = citation_target_id(bundle, direct) if direct is not None else None
             prepared_inputs.append({
                 "ref": ref, "span_id": span.span_id, "name": operand.name, "value": operand.value,
-                "unit": operand.unit, "period": operand.period, "entity": operand.entity, "kind": operand.kind,
+                "unit": operand.unit, "period": operand.period, "entity": operand.entity, "metric": operand.metric,
+                "kind": operand.kind,
                 "label": f"Independently located input “{operand.name}”", "provenance": PREPARED_INPUT_PROVENANCE,
                 # The original candidate input keeps its own status and reason; never overwritten here.
                 "original": {"status": original.status, "reason": original.reason} if original is not None else None,
@@ -663,6 +668,10 @@ def atom_view(bundle, manifest, render_manifests=()):
                            if direct is not None else None),
                 "calculation": operand.calculation.model_dump(mode="json") if operand.calculation else None,
                 "calculation_leaves": leaves_of(operand.calculation, "prepared_input")})
+        # The author's own declarations travel beside the evidence, never as evidence.
+        declarations = [{"claim_id": cid, "label": AUTHOR_DECLARATION_LABEL,
+                         "declaration": claims[cid].support_declaration, "provenance": AUTHOR_DECLARATION_PROVENANCE}
+                        for cid in item.claim_ids if cid in claims and claims[cid].support_declaration]
         rows.append({**item.model_dump(mode="json"), "prepared_refs": list(item.prepared_refs),
                      "prepared_input_refs": list(item.prepared_input_refs),
                      "targets": [describe(t, bindings.get(t)) for t in item.citation_target_ids],
@@ -670,7 +679,8 @@ def atom_view(bundle, manifest, render_manifests=()):
                      "calculation": calc.model_dump(mode="json") if calc else None,
                      "calculation_leaves": leaves_of(calc, "calculation_input"),
                      # Kept apart from the original candidate evidence above; never merged into it.
-                     "preparations": preparations, "prepared_inputs": prepared_inputs})
+                     "preparations": preparations, "prepared_inputs": prepared_inputs,
+                     "author_declarations": declarations})
     return {"schema_version": manifest.schema_version, "provenance": manifest.provenance,
             "atomization": manifest.atomization.model_dump(mode="json"), "rows": rows,
             "verification_note": "Opening a source, matching a number or recomputing arithmetic never checks a row."}

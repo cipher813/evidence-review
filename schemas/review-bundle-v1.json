@@ -78,6 +78,11 @@
           "additionalProperties": true,
           "title": "Recomputation",
           "type": "object"
+        },
+        "declared_tolerance": {
+          "default": "",
+          "title": "Declared Tolerance",
+          "type": "string"
         }
       },
       "required": [
@@ -175,6 +180,11 @@
             }
           ],
           "default": null
+        },
+        "support_declaration": {
+          "default": "",
+          "title": "Support Declaration",
+          "type": "string"
         }
       },
       "required": [
@@ -539,6 +549,11 @@
             }
           ],
           "default": null
+        },
+        "metric": {
+          "default": "",
+          "title": "Metric",
+          "type": "string"
         }
       },
       "required": [

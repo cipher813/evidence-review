@@ -73,6 +73,13 @@ def build_manifest(root, verification, coverage, tests_passed, source_tree):
             "distinct accessible names for each atom row's expansion control, checkbox and source link (Chromium)",
             "allowlisted local HTML styling kept via CSSOM under the unchanged CSP; header scope inferred only where "
             "table structure proves it (synthetic, Chromium)",
+            "operand metric, entity, period, unit and tolerance shown in expanded calculation and prepared-input "
+            "rows (synthetic, Chromium)",
+            "author's declared tolerance shown beside the numeric tolerance and never parsed or used in "
+            "recomputation; absent metric, declared tolerance and support declaration keep sealed bundle hashes",
+            "author's support declaration shown in atom rows, the calculation card and the evidence pane as the "
+            "author's, never checking a row, counting as a citation or changing evidence state or the verified-"
+            "verdict gate (synthetic, Chromium)",
         ],
         "unverified": [
             "human usability and reviewer effort (no pilot run)",
