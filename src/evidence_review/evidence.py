@@ -1,6 +1,7 @@
 """Deterministic inventory, passage navigation and bounded Decimal arithmetic."""
 
 import ast
+import decimal
 import re
 from decimal import Decimal, InvalidOperation
 from .contracts import NumericSpan
@@ -258,40 +259,75 @@ def inventory(bundle):
     }
 
 
+def evaluate(formula, values):
+    """Bounded Decimal evaluation of +, -, *, / over named values; never ``eval``.
+
+    Raises on unsupported syntax, unknown names and arithmetic faults."""
+    if len(formula) > 1000:
+        raise ValueError("formula too long")
+    tree = ast.parse(formula, mode="eval")
+    if len(list(ast.walk(tree))) > 100:
+        raise ValueError("formula too complex")
+
+    def visit(node):
+        if isinstance(node, ast.Expression):
+            return visit(node.body)
+        if isinstance(node, ast.Constant) and type(node.value) in (int, float):
+            return Decimal(ast.get_source_segment(formula, node))
+        if isinstance(node, ast.Name):
+            return Decimal(values[node.id])
+        if isinstance(node, ast.UnaryOp) and isinstance(
+            node.op, (ast.UAdd, ast.USub)
+        ):
+            value = visit(node.operand)
+            return -value if isinstance(node.op, ast.USub) else value
+        if isinstance(node, ast.BinOp) and isinstance(
+            node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div)
+        ):
+            a, b = visit(node.left), visit(node.right)
+            if isinstance(node.op, ast.Add):
+                return a + b
+            if isinstance(node.op, ast.Sub):
+                return a - b
+            if isinstance(node.op, ast.Mult):
+                return a * b
+            return a / b
+        raise ValueError("unsupported formula syntax")
+
+    return visit(tree)
+
+
+SAFE_FORMULA_NODES = (ast.Expression, ast.Constant, ast.Name, ast.Load, ast.UnaryOp, ast.UAdd,
+                      ast.USub, ast.BinOp, ast.Add, ast.Sub, ast.Mult, ast.Div)
+
+
+class UnsafeFormula(ValueError):
+    """A formula outside the evaluator's grammar; refused, never stored or run."""
+
+
+def formula_names(formula):
+    """Names a formula reads, after a structural check against ``evaluate``'s grammar.
+
+    Raises ``SyntaxError`` for an incomplete or malformed expression and
+    ``UnsafeFormula`` for any construct (call, attribute, power, comparison,
+    string, boolean, ...) the bounded evaluator does not accept."""
+    if len(formula) > 1000:
+        raise UnsafeFormula("formula too long")
+    tree = ast.parse(formula, mode="eval")
+    nodes = list(ast.walk(tree))
+    if len(nodes) > 100:
+        raise UnsafeFormula("formula too complex")
+    for node in nodes:
+        if not isinstance(node, SAFE_FORMULA_NODES) or (
+            isinstance(node, ast.Constant) and type(node.value) not in (int, float)
+        ):
+            raise UnsafeFormula("unsupported formula syntax: " + type(node).__name__)
+    return sorted({n.id for n in nodes if isinstance(n, ast.Name)})
+
+
 def calculate(formula, values, reported, tolerance):
     try:
-        if len(formula) > 1000:
-            raise ValueError("formula too long")
-        tree = ast.parse(formula, mode="eval")
-        if len(list(ast.walk(tree))) > 100:
-            raise ValueError("formula too complex")
-
-        def visit(node):
-            if isinstance(node, ast.Expression):
-                return visit(node.body)
-            if isinstance(node, ast.Constant) and type(node.value) in (int, float):
-                return Decimal(ast.get_source_segment(formula, node))
-            if isinstance(node, ast.Name):
-                return Decimal(values[node.id])
-            if isinstance(node, ast.UnaryOp) and isinstance(
-                node.op, (ast.UAdd, ast.USub)
-            ):
-                value = visit(node.operand)
-                return -value if isinstance(node.op, ast.USub) else value
-            if isinstance(node, ast.BinOp) and isinstance(
-                node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div)
-            ):
-                a, b = visit(node.left), visit(node.right)
-                if isinstance(node.op, ast.Add):
-                    return a + b
-                if isinstance(node.op, ast.Sub):
-                    return a - b
-                if isinstance(node.op, ast.Mult):
-                    return a * b
-                return a / b
-            raise ValueError("unsupported formula syntax")
-
-        result = visit(tree)
+        result = evaluate(formula, values)
         delta = result - Decimal(reported)
         tol = Decimal(tolerance)
         if (
@@ -314,6 +350,70 @@ def calculate(formula, values, reported, tolerance):
             "reason": str(exc),
             "evidence_verified": False,
         }
+
+
+WORKSHEET_NOTE = ("Reviewer-authored arithmetic over reviewer-entered inputs. It does not "
+                  "establish that the subject is supported, and it never changes a supplied formula.")
+
+
+def _number(text):
+    try:
+        value = Decimal(text.strip())
+    except InvalidOperation:
+        return None
+    return value if value.is_finite() else None
+
+
+def worksheet_computation(ws):
+    """Derived outcome of one reviewer worksheet; inputs are never altered.
+
+    ``invalid``: the inputs cannot be evaluated yet (no formula, malformed
+    expression, undeclared name, non-numeric value). ``incomplete``: the formula
+    reads an unavailable or blank input. ``calculation_error``: evaluation failed
+    (division by zero is retained here, never coerced). ``computed``: a Decimal
+    result, compared with the reported value only when one was entered."""
+    base = {"evaluator": "evidence_review.evidence.evaluate", "result": None, "comparison": "not_compared",
+            "discrepancy": None, "reason": "", "unavailable": [], "evidence_verified": False,
+            "note": WORKSHEET_NOTE}
+    formula = ws.formula.strip()
+    if not formula:
+        return {**base, "status": "invalid", "reason": "no formula entered"}
+    try:
+        names = formula_names(formula)
+    except SyntaxError:
+        return {**base, "status": "invalid", "reason": "formula syntax incomplete or invalid"}
+    operands = {o.name: o for o in ws.operands}
+    undeclared = [n for n in names if n not in operands]
+    if undeclared:
+        return {**base, "status": "invalid", "reason": "undeclared operand: " + ", ".join(undeclared)}
+    unavailable = [n for n in names if operands[n].availability == "unavailable" or not operands[n].value.strip()]
+    malformed = [n for n in names if n not in unavailable and _number(operands[n].value) is None]
+    if malformed:
+        return {**base, "status": "invalid", "reason": "operand value is not a decimal number: " + ", ".join(malformed)}
+    if unavailable:
+        return {**base, "status": "incomplete", "unavailable": unavailable,
+                "reason": "unavailable input: " + ", ".join(unavailable)}
+    try:
+        result = evaluate(formula, {n: operands[n].value.strip() for n in names})
+    except ArithmeticError as exc:
+        # C decimal reports 0/0 as InvalidOperation carrying the DivisionUndefined signal.
+        signals = exc.args[0] if exc.args and isinstance(exc.args[0], list) else []
+        if isinstance(exc, ZeroDivisionError) or decimal.DivisionUndefined in signals:
+            reason = "division by zero"
+        elif isinstance(exc, decimal.Overflow) or decimal.Overflow in signals:
+            reason = "result outside the decimal range"
+        else:
+            reason = "arithmetic error: " + type(exc).__name__
+        return {**base, "status": "calculation_error", "reason": reason}
+    out = {**base, "status": "computed", "result": str(result)}
+    reported, tolerance = _number(ws.reported_value), _number(ws.tolerance)
+    if ws.reported_value.strip() == "":
+        return {**out, "reason": "no reported value entered"}
+    if reported is None or tolerance is None or tolerance < 0:
+        return {**out, "reason": "reported value or tolerance is not a non-negative decimal"}
+    compared = calculate(formula, {n: operands[n].value.strip() for n in names},
+                         ws.reported_value.strip(), ws.tolerance.strip())
+    return {**out, "comparison": compared["status"], "discrepancy": compared.get("discrepancy")}
 
 
 def navigation_coverage(bundle, links):
