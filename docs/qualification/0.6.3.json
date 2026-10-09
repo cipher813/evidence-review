@@ -2,7 +2,7 @@
   "schema_version": "evidence-review-qualification/v1",
   "package_version": "0.6.3",
   "source_tree_sha1": "4fa5c4eda03d6dc8f3c4e3d62bfa297e1a6b9515",
-  "verified_source_commit": null,
+  "verified_source_commit": "4bf6b439b0fe64028f954d717f85e7b418829698",
   "wheel": "evidence_review-0.6.3-py3-none-any.whl",
   "wheel_sha256": "511cf239fc31503659bd081e3abcec8380d356fd9437692c11828a0d9c9097a3",
   "reproducible_wheel": true,
