@@ -249,11 +249,13 @@ def _span_targets(bundle, span):
         return [], "derived", f"span:{span.span_id}"
     cites = [c for c in span.citations if c.status == "located"]
     if span.state == "ambiguous" or len(cites) > 1:
-        targets = [citation_target_id(bundle, c) for c in cites]
+        # A repeated citation is one candidate, not two: deduplicate in first-seen order, as the fact
+        # builder does, so [A, B, A] presents exactly A and B (I12181). The frozen span is unchanged.
+        targets = list(dict.fromkeys(citation_target_id(bundle, c) for c in cites))
         # A producer may mark a number ambiguous without attaching two located candidates (the bundle
         # contract allows it). That one occurrence is unavailable, never located on its one candidate,
         # and it never refuses the rest of the bundle.
-        if len(set(targets)) < 2:
+        if len(targets) < 2:
             return [], "unavailable", None
         return targets, "ambiguous", None
     if len(cites) == 1:
