@@ -312,9 +312,11 @@ body.atomic-mode main { grid-template-areas: "report report report" "height heig
    table's column headers (period, unit) stay pinned above the highlighted row. */
 body.atomic-mode .review-pane[aria-label="Evidence"] { display: flex; flex-direction: column; }
 body.atomic-mode .review-pane[aria-label="Evidence"] > * { flex: none; }
-body.atomic-mode #viewer:not([hidden]) { flex: 1 1 auto; min-height: 16rem; display: flex; flex-direction: column; }
+/* Reserve the header plus a bounded source viewport before the pane scrolls. Shrinking the viewer
+   below that sum let document text paint over following evidence controls (I12195). */
+body.atomic-mode #viewer:not([hidden]) { flex: 1 0 auto; min-height: 16rem; display: flex; flex-direction: column; }
 body.atomic-mode #viewer > * { flex: none; }
-body.atomic-mode #viewer > .rendered-doc { flex: 1 1 auto; min-height: 10rem; }
+body.atomic-mode #viewer > .rendered-doc { flex: 1 1 10rem; height: 10rem; min-height: 10rem; }
 .rendered-doc thead th, .rendered-doc thead td { position: sticky; top: 0; z-index: 1; background: #fff;
   box-shadow: inset 0 -2px 0 #879bad; }
 .target-context { margin: .2rem 0 .4rem; padding: .25rem .5rem; border-left: 3px solid #1f5f99; background: #f3f7fb; }

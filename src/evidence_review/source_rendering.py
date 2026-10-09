@@ -196,9 +196,12 @@ def _md_line_tree(text, budget, transforms):
             while i < len(lines) and lines[i].lstrip().startswith("|"):
                 i += 1
             grid = [_cells(lines[j]) for j in range(top, i)]
+            # Structural rendering needs a separator and rectangular cell positions, not semantic
+            # column identities. Empty corner/sparse header cells are valid Markdown and stay empty;
+            # table_context retains its stricter requirements before inferring quantity/header meaning.
             proven = (len(grid) >= 2 and all(g is not None for g in grid)
                       and all(re.fullmatch(r":?-{3,}:?", c) for c in grid[1])
-                      and len({len(g) for g in grid}) == 1 and all(grid[0]))
+                      and len({len(g) for g in grid}) == 1)
             if not proven:
                 transforms.append(f"lines {top + 1}-{i}: table structure not proven; shown as numbered text")
                 block = {"id": budget.node(), "tag": "pre", "children": [
@@ -206,6 +209,8 @@ def _md_line_tree(text, budget, transforms):
                 nodes.append(block)
                 continue
             transforms.append(f"lines {top + 1}-{i}: Markdown pipe table rendered as a table")
+            if not all(grid[0]):
+                transforms.append(f"line {top + 1}: empty header cells preserved; no column labels inferred")
             head = {"id": budget.node(), "tag": "tr", "line": top + 1, "children": []}
             line_nodes[top + 1] = head["id"]
             for c in grid[0]:
