@@ -300,8 +300,6 @@ body.atomic-mode main { grid-template-areas: "report report report" "height heig
 .atom-head { display: flex; flex-wrap: wrap; gap: .3rem .6rem; align-items: baseline; }
 .atom-check { margin: 0; font-weight: 600; }
 .atom-state { font-size: .9em; color: #4c5e6b; }
-.atom-row.ambiguous .atom-state::before, .atom-row.unavailable .atom-state::before,
-.atom-row.unsupported .atom-state::before { content: "? "; font-weight: 700; }
 .atom-link { font-weight: 600; }
 #viewer { border: 1px solid #d3dde5; border-radius: 6px; padding: .5rem; margin-bottom: .6rem; }
 .viewer-head { display: flex; justify-content: space-between; align-items: baseline; gap: .5rem; flex-wrap: wrap; }

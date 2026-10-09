@@ -1,10 +1,10 @@
 {
   "schema_version": "evidence-review-qualification/v1",
   "package_version": "0.6.3",
-  "source_tree_sha1": "0dab4a72fc2003c08148d604df087f7b0fa72678",
-  "verified_source_commit": "bc6281530e4a08ccc4f380984ec26e504a9cdb0f",
+  "source_tree_sha1": "4ba75463fd448c3238d14758ac9bb16f804e67bc",
+  "verified_source_commit": null,
   "wheel": "evidence_review-0.6.3-py3-none-any.whl",
-  "wheel_sha256": "918435bab12f782bcbc8751fcea7b8abcb4927aeea9ff34b275ce6cc9e944848",
+  "wheel_sha256": "c3cc554148912f71b26d53360d7658f013796fa45838aa4eb724ee777d075025",
   "reproducible_wheel": true,
   "clean_noneditable_install": true,
   "installed_files": {
@@ -24,11 +24,11 @@
     "evidence_review/source_rendering.py": "2d2cb3594548b2c617039160b4b8d6ac64020e42b26231c34109ce78000b16fe",
     "evidence_review/store.py": "01bfd80c25865233020208cde1efef24b8794365beba0cf4d09f3ac616edc8eb",
     "evidence_review/table_context.py": "f2953f2a869bf16da716badac5cb24a01d0e606ba30670fa334916cfe365cb2c",
-    "evidence_review/ui/app.js": "eff036e90ab4bfaec37f9d4b56a86ad489cc435f9d0ac573a7670985a8f26075",
+    "evidence_review/ui/app.js": "52725b8ba28f04365e892bbd3033eb61721d1211bb4d30446e4758f40ca39ea0",
     "evidence_review/ui/index.html": "6b1de23bfc6119999a9f287ff726e026e4259ebea18ea0cf77b336e2608865ea",
-    "evidence_review/ui/styles.css": "e7526c82c1e1291deb7251dff855c1399015add9421253fab49d190fdf2d06a2"
+    "evidence_review/ui/styles.css": "4e7c012e960826624e9443496ca1b99c727603de96483d1ffc1ba3c8b7e4cd93"
   },
-  "installed_content_sha256": "70a3640c6c575948d1cb6dc1d571c0c4fc2880282d56ce8a95da89be8a4b0fdf",
+  "installed_content_sha256": "740f8c3654387824a23c3f1bf1e82e11771079c17e90aea6467a5d6fe68ff914",
   "schemas": {
     "answer-annotation-v1.json": "c02bae70e37ee5a59e6fd8a6fb3efb0c3c5470b4f31503ff87550d92b0fc9db9",
     "atom-evidence-v1.json": "bbcf85df5dead2da504667f72904cd858325fad4d22cda0b4d66b532f07a383d",
@@ -36,7 +36,7 @@
     "review-submission-v1.json": "923dd4d944a8362399f291053a59c983d105901a1e397fe8dd15d92e5612bd7c",
     "source-render-manifest-v1.json": "1dac8199de75b5a3afa5306f66fba8dba2ac669a901ca591907b25b75571d52c"
   },
-  "tests_passed": 635,
+  "tests_passed": 637,
   "coverage_percent": 94.27,
   "verified_by_automation": [
     "contracts, atom/render sidecars and capability negotiation",
@@ -78,7 +78,8 @@
     "repeated numeric citations ([A,B,A], [A,A,B], [A,B,A,B]) on ambiguous and multi-citation cited spans build a whole atom manifest with exactly the distinct candidates in first-seen order; repeat-only stays unavailable; frozen bundle bytes unchanged; caller manifests that repeat a candidate still refused (synthetic)",
     "keyboard-only annotation test clears text with the portable ControlOrMeta+a (Linux Chromium in this record)",
     "Rectangular Markdown tables with empty corner/sparse headers render without invented labels; exact targets and immutable source bytes preserved.",
-    "Table and transcript source viewports remain within the viewer and above sibling controls at three sizes with evidence and fidelity details open or closed."
+    "Table and transcript source viewports remain within the viewer and above sibling controls at three sizes with evidence and fidelity details open or closed.",
+    "Shared atom guidance appears once and reflects assigned/unassigned checks; row-specific source states remain visible, prepared sources are distinguished, reasons expand by keyboard, and existing save/submit gates remain intact (Chromium)."
   ],
   "unverified": [
     "human usability and reviewer effort (no pilot run)",

@@ -2260,8 +2260,16 @@ function renderPreparedInputs(inputs, r, more) {
 function renderAtomRows() {
   const box = $("atoms");
   box.hidden = false;
-  box.replaceChildren(el("h3", "Atomic source checks"),
-    el("p", evidence.atoms.verification_note + " Tick a box only after you have checked that atom against its source."));
+  const rows = evidence.atoms.rows;
+  const guidance = [evidence.atoms.verification_note];
+  if (rows.some((r) => atomField(r)))
+    guidance.push("Tick a box only after checking that item against its source.");
+  if (rows.some((r) => !atomField(r)))
+    guidance.push("Rows without a checkbox are for reference; no separate check is assigned.");
+  if (rows.some((r) => r.preparations?.length || r.prepared_inputs?.length))
+    guidance.push("Prepared sources are independently supplied review aids, not a support judgment; they do not change the original source status.");
+  const note = el("p", guidance.join(" ")); note.className = "atom-guidance";
+  box.replaceChildren(el("h3", "Atomic source checks"), note);
   evidence.atoms.rows.forEach((r, i) => {
     const row = el("div"); row.className = "atom-row " + r.evidence_state; row.dataset.atomRow = r.atom_id;
     row.setAttribute("role", "group"); row.setAttribute("aria-label", `Atom ${i + 1}: ${r.text}`);
@@ -2283,9 +2291,9 @@ function renderAtomRows() {
       head.append(label);
     } else {
       const label = el("span", `${i + 1}. “${r.text}”`); label.className = "atom-focus"; label.tabIndex = 0;
-      head.append(label, el("small", "No check control assigned for this atom."));
+      head.append(label);
     }
-    const state = el("span", (r.kind === "quantity" ? "Number · " : "Fact · ") + ATOM_STATE[r.evidence_state]);
+    const state = el("span", ATOM_STATE[r.evidence_state]);
     state.className = "atom-state"; head.append(state);
     const primary = r.targets[0];
     if (primary) {
@@ -2295,11 +2303,10 @@ function renderAtomRows() {
       link.onclick = () => openTarget(primary, link, r);
       head.append(link);
     }
-    if (r.reason) head.append(el("small", "Reason: " + r.reason));
     const preparations = r.preparations || [];
     const preparedInputs = r.prepared_inputs || [];
     if (preparations.length || preparedInputs.length) {
-      const note = el("small", "Independently prepared evidence is available in the details; it is not a support judgment.");
+      const note = el("small", "Prepared sources available");
       note.className = "atom-prepared-note"; head.append(note);
     }
     row.append(head);
@@ -2310,6 +2317,7 @@ function renderAtomRows() {
     // Each row's expansion has its own accessible name, distinct from its checkbox and source link.
     summary.setAttribute("aria-label", `${summaryText} for “${r.text}” (atom ${i + 1})`);
     more.append(summary);
+    if (r.reason) more.append(el("p", "Reason: " + r.reason));
     more.ontoggle = () => { if (more.open) logEvent("atom_row_expanded", r.atom_id); };
     (r.author_declarations || []).forEach((d) => renderAuthorDeclaration(d, more));
     if (r.calculation && preparations.length) more.append(el("h4", "Original candidate calculation"));
