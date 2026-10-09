@@ -15,7 +15,8 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Protocol
 from .contracts import (MATERIAL_DISPOSITIONS, PACKAGE_VERSION, AnswerAnnotation, CalculationWorksheet, Judgment,
-                        Defect, ReviewSubmission, digest, finite_decimal, now, validate_answer_range)
+                        Defect, ReviewSubmission, digest, finite_decimal, now, sealed_submission,
+                        validate_answer_range)
 from .evidence import passage
 
 
@@ -502,7 +503,8 @@ class FileStore:
 
     def export_submission(self, task_id, revision):
         state = self.load_task(task_id)
-        return ReviewSubmission.model_validate(state["submissions"][str(revision)])
+        # Sealed replay: stored worksheet computations are proven, never recomputed in place.
+        return sealed_submission(state["submissions"][str(revision)])
 
     def _write_hook(self, d, state, hook, event="hook_status"):
         state["hook"] = hook

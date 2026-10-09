@@ -1,0 +1,7 @@
+{
+  "generated_with_version": "0.6.0",
+  "source_commit": "80e58946decc4418408c6b5f87e66a81ed0aa0f3",
+  "bundle_hash": "97504cb556d86a300069f805a631ee61b1662c24f297c43cb3404c70a89ae20f",
+  "export_sha256": "f9444be0b5d7812c82c7f6a1b8865a9829bc17da83d28d405a1f931e2f163b99",
+  "purpose": "Synthetic 0.6.0 durable worksheet submission fixture (default Decimal context); no study data"
+}

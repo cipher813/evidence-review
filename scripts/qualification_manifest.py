@@ -104,6 +104,19 @@ def build_manifest(root, verification, coverage, tests_passed, source_tree):
             "worksheets linked to answer annotations by annotation_id; a dangling link is refused on save and submit, "
             "so a linked annotation cannot be removed; started from an annotation card (synthetic, Chromium)",
             "answers, submissions and exports without annotations or worksheets keep their earlier bytes and hashes",
+            "reviewer arithmetic pinned to decimal-v1 (prec=28, ROUND_HALF_EVEN, Emin/Emax -/+999999, traps "
+            "InvalidOperation, DivisionByZero, Overflow) whatever the caller's decimal context; non-finite and "
+            "out-of-range worksheet results are calculation errors; 0.6.0 computations reproduced digit for digit",
+            "export replays each sealed worksheet and keeps its stored computation byte for byte or refuses it naming "
+            "the worksheet, never recomputing in place (synthetic 0.6.0 submission fixture)",
+            "ambiguous candidates are distinct identities: repeated atom candidate_target_ids and repeated rendered "
+            "target candidates refused by model, JSON and schema (uniqueItems); builders degrade repeat-only "
+            "locations to unavailable, never located or exact; the view never shows one target twice (synthetic)",
+            "answer annotations bind original answer text only: endpoints inside inserted calculation cards, "
+            "diagnostics or controls refused; a crossing selection accepted only over one contiguous run of the "
+            "field whose text equals the frozen substring (Chromium)",
+            "keyboard-only annotation through radio groups for answer field, occurrence, disposition and materiality, "
+            "reached by Tab, with the same code-point range as a mouse selection (Chromium)",
         ],
         "unverified": [
             "human usability and reviewer effort (no pilot run)",

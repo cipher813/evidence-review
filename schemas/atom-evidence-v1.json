@@ -125,7 +125,8 @@
             "type": "string"
           },
           "title": "Candidate Target Ids",
-          "type": "array"
+          "type": "array",
+          "uniqueItems": true
         },
         "calculation_ref": {
           "anyOf": [
