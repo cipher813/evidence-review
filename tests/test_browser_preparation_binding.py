@@ -43,6 +43,12 @@ def test_bound_check_is_reachable_gates_support_submits_and_reloads(tmp_path, br
         row = page.locator("[data-atom-row]")
         expect(row).to_have_count(1)
         expect(row).not_to_contain_text("No check control assigned")
+        number = page.locator("#current-item .number").filter(has_text="10")
+        if not number.count():
+            number = page.locator(".number").filter(has_text="10").first
+        number.click()
+        expect(row.locator(".atom-focus")).to_be_focused()
+        expect(row).to_be_in_viewport()
         check = row.locator('input[data-quantity-field="quantity:check"]')
         expect(check).to_have_count(1)
         page.locator("#field-support\\:c").select_option("supported")
@@ -77,8 +83,11 @@ def test_prepared_only_row_shows_and_navigates_preparation_without_checking(tmp_
                      presentation_mode=ATOMIC) as h:
         ctx, page, errors = opened(browser, h)
         row = page.locator("[data-atom-row]")
-        expect(row).to_contain_text("No source located")  # Original candidate state, unchanged.
-        expect(row).to_contain_text("Independently prepared evidence is available")
+        expect(row).to_contain_text("Original citation unresolved")  # Original candidate state, unchanged.
+        expect(row).to_contain_text("Prepared sources available")
+        expect(page.locator(".atom-guidance")).to_contain_text("not a support judgment")
+        expect(row.locator(".atom-head")).not_to_contain_text("Reason:")
+        expect(row.locator(".atom-state")).to_have_text("Original citation unresolved")
         row.locator("summary").first.click()
         prep = row.locator("[data-prepared-ref]")
         expect(prep).to_have_count(1)
@@ -122,5 +131,36 @@ def test_original_and_prepared_calculations_are_labelled_separately(tmp_path, br
         prep.get_by_role("button", name="Open prepared input 2 source").click()
         expect(page.locator("#viewer .target-hit")).to_contain_text("22.8%")
         expect(row.locator("input[type=checkbox]")).not_to_be_checked()
+        assert not errors
+        ctx.close()
+
+
+@pytest.mark.parametrize("assigned", [True, False])
+def test_shared_guidance_matches_assignments_and_reasons_expand(tmp_path, browser, assigned):
+    b = prepared_margin(claim_ids=["c"])
+    if assigned:
+        d = b.model_dump(mode="json")
+        d["form"].append(dict(field_id="quantity:margin", label="Checked 180 bps", kind="boolean", required=False,
+                              subject_id="c", numeric_span_id=b.spans[0].span_id))
+        b = validate_bundle(d)
+    with open_review(b, FileStore(tmp_path), launch=False, atom_evidence=build_atom_manifest(b),
+                     presentation_mode=ATOMIC) as h:
+        ctx, page, errors = opened(browser, h)
+        guide = page.locator(".atom-guidance")
+        expect(guide).to_have_count(1)
+        expect(guide).to_contain_text("not a support judgment")
+        if assigned:
+            expect(guide).not_to_contain_text("Rows without a checkbox")
+        else:
+            expect(guide).to_contain_text("Rows without a checkbox")
+            expect(guide).not_to_contain_text("Tick a box")
+        row = page.locator("[data-atom-row]")
+        expect(row.locator(".atom-head")).not_to_contain_text("No check control")
+        expect(row.locator(".atom-head")).not_to_contain_text("Reason:")
+        reason = row.get_by_text("Reason: No source located for this number", exact=True)
+        expect(reason).not_to_be_visible()
+        row.locator("summary").first.focus()
+        page.keyboard.press("Enter")
+        expect(reason).to_be_visible()
         assert not errors
         ctx.close()

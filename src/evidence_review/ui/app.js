@@ -709,7 +709,8 @@ function showCalculation(span, anchor) {
   logEvent("span_opened", span.span_id);
 }
 function numberAction(s, verificationControls = true) {
-  const direct = bundle.task_kind === "reference" ? null : directCitation(s);
+  const atom = atomicMode() ? evidence.atoms.rows.find((r) => r.numeric_span_id === s.span_id) : null;
+  const direct = atom || bundle.task_kind === "reference" ? null : directCitation(s);
   const prepared = bundle.task_kind === "reference" && Boolean(s.prepared_evidence?.length);
   const b = el(direct ? "a" : "button");
   // The number's own text is original answer text at its exact offsets.
@@ -724,8 +725,10 @@ function numberAction(s, verificationControls = true) {
   const stateLabel = prepared ? "opens independently prepared evidence" : s.diagnostics ? `candidate evidence ${s.state}; preparation ${s.diagnostics.preparation_status}` : s.state;
   b.title = stateLabel + (s.reason ? ": " + s.reason : "");
   b.setAttribute("aria-label", `${s.text}, ${stateLabel}${direct ? ", opens the cited line of the original" : ""}`);
+  if (atom) b.setAttribute("aria-label", `${s.text}: go to its check row (${ATOM_STATE[atom.evidence_state]})`);
   b.onclick = () => {
-    if (bundle.task_kind === "reference") showSpan(s, false);
+    if (atom) focusAtomRow(atom);
+    else if (bundle.task_kind === "reference") showSpan(s, false);
     else if (direct) logEvent("original_opened", direct.citation.source_id);
     else if (s.calculation) showCalculation(s, b);
     else showSpan(s, false);
@@ -2137,7 +2140,7 @@ const ATOM_STATE = {
   located: "Source located",
   derived: "Calculated from inputs",
   ambiguous: "Ambiguous: several candidate sources, none chosen",
-  unavailable: "No source located",
+  unavailable: "Original citation unresolved",
   unsupported: "No supporting source identified",
 };
 // Where each row target's binding to this exact occurrence comes from.
@@ -2149,6 +2152,11 @@ const BINDING = {
   linked_statement_citation: "cited by the statement this fact belongs to",
   declared_atom_citation: "declared for this fact by the caller's atomization",
 };
+function focusAtomRow(row) {
+  const target = document.querySelector(`[data-atom-row="${CSS.escape(row.atom_id)}"]`);
+  target?.scrollIntoView({ block: "nearest" });
+  target?.querySelector(".atom-focus")?.focus({ preventScroll: true });
+}
 function atomField(row) {
   return row.form_field_id ? bundle.form.find((f) => f.field_id === row.form_field_id) : null;
 }
@@ -2170,7 +2178,7 @@ function renderAtomicStatements() {
       const mark = el("button"); mark.append(originalText(f.path, chars, r.start, r.end));
       mark.type = "button"; mark.className = "atom-mark " + r.evidence_state; mark.dataset.atomMark = r.atom_id;
       mark.setAttribute("aria-label", `${r.text}: go to its check row (${ATOM_STATE[r.evidence_state]})`);
-      mark.onclick = () => document.querySelector(`[data-atom-row="${CSS.escape(r.atom_id)}"] .atom-focus`)?.focus();
+      mark.onclick = () => focusAtomRow(r);
       p.append(mark);
       at = r.end;
     });
@@ -2260,8 +2268,16 @@ function renderPreparedInputs(inputs, r, more) {
 function renderAtomRows() {
   const box = $("atoms");
   box.hidden = false;
-  box.replaceChildren(el("h3", "Atomic source checks"),
-    el("p", evidence.atoms.verification_note + " Tick a box only after you have checked that atom against its source."));
+  const rows = evidence.atoms.rows;
+  const guidance = [evidence.atoms.verification_note];
+  if (rows.some((r) => atomField(r)))
+    guidance.push("Tick a box only after checking that item against its source.");
+  if (rows.some((r) => !atomField(r)))
+    guidance.push("Rows without a checkbox are for reference; no separate check is assigned.");
+  if (rows.some((r) => r.preparations?.length || r.prepared_inputs?.length))
+    guidance.push("Prepared sources are independently supplied review aids, not a support judgment; they do not change the original source status.");
+  const note = el("p", guidance.join(" ")); note.className = "atom-guidance";
+  box.replaceChildren(el("h3", "Atomic source checks"), note);
   evidence.atoms.rows.forEach((r, i) => {
     const row = el("div"); row.className = "atom-row " + r.evidence_state; row.dataset.atomRow = r.atom_id;
     row.setAttribute("role", "group"); row.setAttribute("aria-label", `Atom ${i + 1}: ${r.text}`);
@@ -2283,9 +2299,9 @@ function renderAtomRows() {
       head.append(label);
     } else {
       const label = el("span", `${i + 1}. “${r.text}”`); label.className = "atom-focus"; label.tabIndex = 0;
-      head.append(label, el("small", "No check control assigned for this atom."));
+      head.append(label);
     }
-    const state = el("span", (r.kind === "quantity" ? "Number · " : "Fact · ") + ATOM_STATE[r.evidence_state]);
+    const state = el("span", ATOM_STATE[r.evidence_state]);
     state.className = "atom-state"; head.append(state);
     const primary = r.targets[0];
     if (primary) {
@@ -2295,11 +2311,10 @@ function renderAtomRows() {
       link.onclick = () => openTarget(primary, link, r);
       head.append(link);
     }
-    if (r.reason) head.append(el("small", "Reason: " + r.reason));
     const preparations = r.preparations || [];
     const preparedInputs = r.prepared_inputs || [];
     if (preparations.length || preparedInputs.length) {
-      const note = el("small", "Independently prepared evidence is available in the details; it is not a support judgment.");
+      const note = el("small", "Prepared sources available");
       note.className = "atom-prepared-note"; head.append(note);
     }
     row.append(head);
@@ -2310,6 +2325,7 @@ function renderAtomRows() {
     // Each row's expansion has its own accessible name, distinct from its checkbox and source link.
     summary.setAttribute("aria-label", `${summaryText} for “${r.text}” (atom ${i + 1})`);
     more.append(summary);
+    if (r.reason) more.append(el("p", "Reason: " + r.reason));
     more.ontoggle = () => { if (more.open) logEvent("atom_row_expanded", r.atom_id); };
     (r.author_declarations || []).forEach((d) => renderAuthorDeclaration(d, more));
     if (r.calculation && preparations.length) more.append(el("h4", "Original candidate calculation"));
