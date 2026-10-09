@@ -1,10 +1,10 @@
 {
   "schema_version": "evidence-review-qualification/v1",
   "package_version": "0.6.3",
-  "source_tree_sha1": "4ba75463fd448c3238d14758ac9bb16f804e67bc",
-  "verified_source_commit": "3906c4a0690f8ec1178dbc0601324f6304a1d2c1",
+  "source_tree_sha1": "4fa5c4eda03d6dc8f3c4e3d62bfa297e1a6b9515",
+  "verified_source_commit": null,
   "wheel": "evidence_review-0.6.3-py3-none-any.whl",
-  "wheel_sha256": "c3cc554148912f71b26d53360d7658f013796fa45838aa4eb724ee777d075025",
+  "wheel_sha256": "511cf239fc31503659bd081e3abcec8380d356fd9437692c11828a0d9c9097a3",
   "reproducible_wheel": true,
   "clean_noneditable_install": true,
   "installed_files": {
@@ -24,11 +24,11 @@
     "evidence_review/source_rendering.py": "2d2cb3594548b2c617039160b4b8d6ac64020e42b26231c34109ce78000b16fe",
     "evidence_review/store.py": "01bfd80c25865233020208cde1efef24b8794365beba0cf4d09f3ac616edc8eb",
     "evidence_review/table_context.py": "f2953f2a869bf16da716badac5cb24a01d0e606ba30670fa334916cfe365cb2c",
-    "evidence_review/ui/app.js": "52725b8ba28f04365e892bbd3033eb61721d1211bb4d30446e4758f40ca39ea0",
+    "evidence_review/ui/app.js": "041281fdbb64f34b0bcd30e02c2556d55de481af45ac1b4b6add6bf4fcc5fb28",
     "evidence_review/ui/index.html": "6b1de23bfc6119999a9f287ff726e026e4259ebea18ea0cf77b336e2608865ea",
     "evidence_review/ui/styles.css": "4e7c012e960826624e9443496ca1b99c727603de96483d1ffc1ba3c8b7e4cd93"
   },
-  "installed_content_sha256": "740f8c3654387824a23c3f1bf1e82e11771079c17e90aea6467a5d6fe68ff914",
+  "installed_content_sha256": "db14f1afc657c25c5a3fa76e34ff2b02aa88e3bcf5deaa8c911052a9f7bc1779",
   "schemas": {
     "answer-annotation-v1.json": "c02bae70e37ee5a59e6fd8a6fb3efb0c3c5470b4f31503ff87550d92b0fc9db9",
     "atom-evidence-v1.json": "bbcf85df5dead2da504667f72904cd858325fad4d22cda0b4d66b532f07a383d",
@@ -79,7 +79,8 @@
     "keyboard-only annotation test clears text with the portable ControlOrMeta+a (Linux Chromium in this record)",
     "Rectangular Markdown tables with empty corner/sparse headers render without invented labels; exact targets and immutable source bytes preserved.",
     "Table and transcript source viewports remain within the viewer and above sibling controls at three sizes with evidence and fidelity details open or closed.",
-    "Shared atom guidance appears once and reflects assigned/unassigned checks; row-specific source states remain visible, prepared sources are distinguished, reasons expand by keyboard, and existing save/submit gates remain intact (Chromium)."
+    "Shared atom guidance appears once and reflects assigned/unassigned checks; row-specific source states remain visible, prepared sources are distinguished, reasons expand by keyboard, and existing save/submit gates remain intact (Chromium).",
+    "Lower-left quantity links in atomic mode focus and scroll to their exact span-bound row, sharing navigation with the top passage; original citation status is labelled separately from prepared sources (Chromium)."
   ],
   "unverified": [
     "human usability and reviewer effort (no pilot run)",

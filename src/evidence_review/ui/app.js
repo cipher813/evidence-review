@@ -709,7 +709,8 @@ function showCalculation(span, anchor) {
   logEvent("span_opened", span.span_id);
 }
 function numberAction(s, verificationControls = true) {
-  const direct = bundle.task_kind === "reference" ? null : directCitation(s);
+  const atom = atomicMode() ? evidence.atoms.rows.find((r) => r.numeric_span_id === s.span_id) : null;
+  const direct = atom || bundle.task_kind === "reference" ? null : directCitation(s);
   const prepared = bundle.task_kind === "reference" && Boolean(s.prepared_evidence?.length);
   const b = el(direct ? "a" : "button");
   // The number's own text is original answer text at its exact offsets.
@@ -724,8 +725,10 @@ function numberAction(s, verificationControls = true) {
   const stateLabel = prepared ? "opens independently prepared evidence" : s.diagnostics ? `candidate evidence ${s.state}; preparation ${s.diagnostics.preparation_status}` : s.state;
   b.title = stateLabel + (s.reason ? ": " + s.reason : "");
   b.setAttribute("aria-label", `${s.text}, ${stateLabel}${direct ? ", opens the cited line of the original" : ""}`);
+  if (atom) b.setAttribute("aria-label", `${s.text}: go to its check row (${ATOM_STATE[atom.evidence_state]})`);
   b.onclick = () => {
-    if (bundle.task_kind === "reference") showSpan(s, false);
+    if (atom) focusAtomRow(atom);
+    else if (bundle.task_kind === "reference") showSpan(s, false);
     else if (direct) logEvent("original_opened", direct.citation.source_id);
     else if (s.calculation) showCalculation(s, b);
     else showSpan(s, false);
@@ -2137,7 +2140,7 @@ const ATOM_STATE = {
   located: "Source located",
   derived: "Calculated from inputs",
   ambiguous: "Ambiguous: several candidate sources, none chosen",
-  unavailable: "No source located",
+  unavailable: "Original citation unresolved",
   unsupported: "No supporting source identified",
 };
 // Where each row target's binding to this exact occurrence comes from.
@@ -2149,6 +2152,11 @@ const BINDING = {
   linked_statement_citation: "cited by the statement this fact belongs to",
   declared_atom_citation: "declared for this fact by the caller's atomization",
 };
+function focusAtomRow(row) {
+  const target = document.querySelector(`[data-atom-row="${CSS.escape(row.atom_id)}"]`);
+  target?.scrollIntoView({ block: "nearest" });
+  target?.querySelector(".atom-focus")?.focus({ preventScroll: true });
+}
 function atomField(row) {
   return row.form_field_id ? bundle.form.find((f) => f.field_id === row.form_field_id) : null;
 }
@@ -2170,7 +2178,7 @@ function renderAtomicStatements() {
       const mark = el("button"); mark.append(originalText(f.path, chars, r.start, r.end));
       mark.type = "button"; mark.className = "atom-mark " + r.evidence_state; mark.dataset.atomMark = r.atom_id;
       mark.setAttribute("aria-label", `${r.text}: go to its check row (${ATOM_STATE[r.evidence_state]})`);
-      mark.onclick = () => document.querySelector(`[data-atom-row="${CSS.escape(r.atom_id)}"] .atom-focus`)?.focus();
+      mark.onclick = () => focusAtomRow(r);
       p.append(mark);
       at = r.end;
     });

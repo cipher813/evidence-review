@@ -43,6 +43,12 @@ def test_bound_check_is_reachable_gates_support_submits_and_reloads(tmp_path, br
         row = page.locator("[data-atom-row]")
         expect(row).to_have_count(1)
         expect(row).not_to_contain_text("No check control assigned")
+        number = page.locator("#current-item .number").filter(has_text="10")
+        if not number.count():
+            number = page.locator(".number").filter(has_text="10").first
+        number.click()
+        expect(row.locator(".atom-focus")).to_be_focused()
+        expect(row).to_be_in_viewport()
         check = row.locator('input[data-quantity-field="quantity:check"]')
         expect(check).to_have_count(1)
         page.locator("#field-support\\:c").select_option("supported")
@@ -77,11 +83,11 @@ def test_prepared_only_row_shows_and_navigates_preparation_without_checking(tmp_
                      presentation_mode=ATOMIC) as h:
         ctx, page, errors = opened(browser, h)
         row = page.locator("[data-atom-row]")
-        expect(row).to_contain_text("No source located")  # Original candidate state, unchanged.
+        expect(row).to_contain_text("Original citation unresolved")  # Original candidate state, unchanged.
         expect(row).to_contain_text("Prepared sources available")
         expect(page.locator(".atom-guidance")).to_contain_text("not a support judgment")
         expect(row.locator(".atom-head")).not_to_contain_text("Reason:")
-        expect(row.locator(".atom-state")).to_have_text("No source located")
+        expect(row.locator(".atom-state")).to_have_text("Original citation unresolved")
         row.locator("summary").first.click()
         prep = row.locator("[data-prepared-ref]")
         expect(prep).to_have_count(1)
