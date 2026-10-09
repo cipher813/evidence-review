@@ -477,6 +477,20 @@ _MARKUP_PREFIX = re.compile(r"^\s*(?:#{1,6}\s+|>\s*|(?:[-*+]|\d{1,3}[.)])\s+)")
 UNPROVEN_CONTEXT = ("The excerpt occurs in the original, but the text around it does not match the cited frozen "
                     "line (a different metric, period or passage may hold the same words); location not proven")
 
+REPEATED_CANDIDATE = ("The excerpt repeats within one rendered location, so fewer than two distinct candidates exist; "
+                      "no candidate is shown and none is chosen")
+
+
+def distinct_candidates(candidates):
+    """Candidates in first-seen order, one per identity (the set of rendered nodes it highlights)."""
+    seen, out = set(), []
+    for c in candidates:
+        key = frozenset(c)
+        if key not in seen:
+            seen.add(key)
+            out.append(list(c))
+    return out
+
 
 def _context_text(cited_lines):
     """The cited frozen lines as prose: block markup removed, whitespace normalized, nothing else changed."""
@@ -554,9 +568,11 @@ def _html_targets(source, citations, nodes, raw_sha):
         if len(proven) == 1:
             out.append(RenderedSourceTarget(**base, dom_targets=[proven[0]["id"]], status="exact"))
         elif len(proven) > 1 or len(hits) > 1:
-            shown = proven if len(proven) > 1 else hits
-            out.append(RenderedSourceTarget(**base, status="ambiguous", candidates=[[h["id"]] for h in shown],
-                                            reason=f"Excerpt occurs in {len(shown)} places in the original; none chosen"))
+            shown = distinct_candidates([[h["id"]] for h in (proven if len(proven) > 1 else hits)])
+            out.append(RenderedSourceTarget(**base, status="ambiguous", candidates=shown,
+                                            reason=f"Excerpt occurs in {len(shown)} places in the original; none chosen")
+                       if len(shown) > 1 else
+                       RenderedSourceTarget(**base, status="unavailable", reason=REPEATED_CANDIDATE))
         elif hits:
             out.append(RenderedSourceTarget(**base, status="unavailable", reason=UNPROVEN_CONTEXT))
         else:
@@ -809,9 +825,12 @@ def _pdf_targets(source, citations, pages, raw_sha, page_map):
                                             dom_targets=[g["id"] for _, g in hit],
                                             reason="" if bbox else "Font widths undeclared; text run highlighted, no box"))
         elif starts:
-            out.append(RenderedSourceTarget(**base, status="ambiguous", candidates=[[g["id"] for _, g in cover(s)]
-                                                                                    for s in starts],
-                                            reason=f"Excerpt occurs {len(starts)} times in the PDF text layer"))
+            # Two occurrences inside one text run cover the same nodes: one location, not two candidates.
+            shown = distinct_candidates([[g["id"] for _, g in cover(s)] for s in starts])
+            out.append(RenderedSourceTarget(**base, status="ambiguous", candidates=shown,
+                                            reason=f"Excerpt occurs in {len(shown)} places in the PDF text layer")
+                       if len(shown) > 1 else
+                       RenderedSourceTarget(**base, status="unavailable", reason=REPEATED_CANDIDATE))
         elif c.start_line in page_map and page_map[c.start_line] <= len(pages):
             out.append(RenderedSourceTarget(**base, status="page_only", page=page_map[c.start_line],
                                             reason="Page has no usable text layer; the page is shown, not the line"

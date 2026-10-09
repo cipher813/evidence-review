@@ -36,7 +36,9 @@ class RenderedSourceTarget(Strict):
     page: int | None = Field(default=None, ge=1)
     bbox: list[float] | None = None
     dom_targets: list[str] = Field(default_factory=list)
-    candidates: list[list[str]] = Field(default_factory=list)
+    # Distinct alternatives: one rendered location listed twice is one candidate, never two. A
+    # candidate's identity is the set of rendered nodes it highlights, so order does not make it new.
+    candidates: list[list[str]] = Field(default_factory=list, json_schema_extra={"uniqueItems": True})
     status: Literal["exact", "page_only", "ambiguous", "unavailable"]
     reason: str = ""
 
@@ -46,6 +48,8 @@ class RenderedSourceTarget(Strict):
             raise ValueError("target line range inverted")
         if self.status == "exact" and not self.dom_targets:
             raise ValueError("exact target needs a rendered node")
+        if len({frozenset(c) for c in self.candidates}) != len(self.candidates):
+            raise ValueError("duplicate render candidate: an ambiguous target's alternatives must be distinct")
         if self.status == "ambiguous" and len(self.candidates) < 2:
             raise ValueError("ambiguous target needs at least two candidates")
         if self.status in ("page_only", "ambiguous", "unavailable") and not self.reason:
