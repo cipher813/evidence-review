@@ -1,0 +1,43 @@
+{
+  "schema_version": "evidence-review-qualification/v1",
+  "package_version": "0.6.2",
+  "source_tree_sha1": "",
+  "verified_source_commit": "",
+  "wheel": "",
+  "wheel_sha256": "",
+  "reproducible_wheel": false,
+  "clean_noneditable_install": false,
+  "installed_files": {
+    "evidence_review/__init__.py": "",
+    "evidence_review/atomic_evidence.py": "",
+    "evidence_review/cli.py": "",
+    "evidence_review/contracts.py": "",
+    "evidence_review/evidence.py": "",
+    "evidence_review/example.py": "",
+    "evidence_review/hooks.py": "",
+    "evidence_review/schemas/answer-annotation-v1.json": "",
+    "evidence_review/schemas/atom-evidence-v1.json": "",
+    "evidence_review/schemas/review-bundle-v1.json": "",
+    "evidence_review/schemas/review-submission-v1.json": "",
+    "evidence_review/schemas/source-render-manifest-v1.json": "",
+    "evidence_review/server.py": "",
+    "evidence_review/source_rendering.py": "",
+    "evidence_review/store.py": "",
+    "evidence_review/table_context.py": "",
+    "evidence_review/ui/app.js": "",
+    "evidence_review/ui/index.html": "",
+    "evidence_review/ui/styles.css": ""
+  },
+  "installed_content_sha256": "",
+  "schemas": {
+    "answer-annotation-v1.json": "",
+    "atom-evidence-v1.json": "",
+    "review-bundle-v1.json": "",
+    "review-submission-v1.json": "",
+    "source-render-manifest-v1.json": ""
+  },
+  "tests_passed": 0,
+  "coverage_percent": 0,
+  "verified_by_automation": [],
+  "unverified": []
+}

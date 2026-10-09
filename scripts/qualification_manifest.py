@@ -117,6 +117,10 @@ def build_manifest(root, verification, coverage, tests_passed, source_tree):
             "field whose text equals the frozen substring (Chromium)",
             "keyboard-only annotation through radio groups for answer field, occurrence, disposition and materiality, "
             "reached by Tab, with the same code-point range as a mouse selection (Chromium)",
+            "repeated numeric citations ([A,B,A], [A,A,B], [A,B,A,B]) on ambiguous and multi-citation cited spans build a "
+            "whole atom manifest with exactly the distinct candidates in first-seen order; repeat-only stays unavailable; "
+            "frozen bundle bytes unchanged; caller manifests that repeat a candidate still refused (synthetic)",
+            "keyboard-only annotation test clears text with the portable ControlOrMeta+a (Linux Chromium in this record)",
         ],
         "unverified": [
             "human usability and reviewer effort (no pilot run)",
