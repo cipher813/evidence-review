@@ -105,7 +105,8 @@ class AtomEvidenceItem(Strict):
     evidence_state: Literal["located", "derived", "ambiguous", "unavailable", "unsupported"]
     reason: str = ""
     citation_target_ids: list[str] = Field(default_factory=list)
-    candidate_target_ids: list[str] = Field(default_factory=list)
+    # Distinct alternatives: one target listed twice is one candidate, never two.
+    candidate_target_ids: list[str] = Field(default_factory=list, json_schema_extra={"uniqueItems": True})
     # The calculation is read from the bound span or claim, never restated here.
     calculation_ref: str | None = None
     # Independently prepared evidence for this occurrence, ``prepared:<span id>:<index>``
@@ -127,6 +128,8 @@ class AtomEvidenceItem(Strict):
             raise ValueError("located atom needs a citation target")
         if self.evidence_state == "derived" and not self.calculation_ref:
             raise ValueError("derived atom needs its calculation reference")
+        if len(set(self.candidate_target_ids)) != len(self.candidate_target_ids):
+            raise ValueError("duplicate candidate target: an ambiguous atom's alternatives must be distinct")
         if self.evidence_state == "ambiguous" and len(self.candidate_target_ids) < 2:
             raise ValueError("ambiguous atom needs at least two candidate targets")
         if self.evidence_state in ("ambiguous", "unavailable", "unsupported") and not self.reason:
@@ -335,6 +338,12 @@ def build_atom_manifest(bundle, facts=(), *, method="evidence-review/numeric-inv
         cites = [c for c in fact.get("citations", []) if c.status == "located"]
         state = fact.get("evidence_state") or ("located" if len(cites) == 1 else "ambiguous" if cites else "unavailable")
         targets = [citation_target_id(bundle, c) for c in cites]
+        distinct = list(dict.fromkeys(targets))
+        reason = fact.get("reason", "")
+        if state == "ambiguous" and len(distinct) < 2 and len(targets) > len(distinct):
+            # Repeated citations of one target are not alternatives: the occurrence degrades to
+            # unavailable, never located on that one target, exactly as an ambiguous number does.
+            state, reason = "unavailable", AMBIGUOUS_WITHOUT_CANDIDATES + (": " + reason if reason else "")
         for t, c in zip(targets, cites):
             entry = declared.setdefault(t, AtomCitation(target_id=t, citation=c))
             if atom_id not in entry.atom_ids:
@@ -342,9 +351,9 @@ def build_atom_manifest(bundle, facts=(), *, method="evidence-review/numeric-inv
         items.append(AtomEvidenceItem(
             atom_id=atom_id, bundle_hash=bundle.bundle_hash, field_path=fact["field_path"], start=start, end=end,
             text=field.text[start:end], kind="fact", claim_ids=list(fact.get("claim_ids", [])),
-            form_field_id=fact_checks.get(atom_id), evidence_state=state, reason=fact.get("reason", ""),
+            form_field_id=fact_checks.get(atom_id), evidence_state=state, reason=reason,
             citation_target_ids=targets if state == "located" else [],
-            candidate_target_ids=targets if state == "ambiguous" else [],
+            candidate_target_ids=distinct if state == "ambiguous" else [],
             calculation_ref=fact.get("calculation_ref"), prepared_refs=list(fact.get("prepared_refs", ())),
             prepared_input_refs=list(fact.get("prepared_input_refs", ()))))
     context = [s.span_id for s in asserted if s.span_id not in assigned]
@@ -626,6 +635,9 @@ def atom_view(bundle, manifest, render_manifests=()):
     claims = {c.claim_id: c for c in bundle.claims}
     rows = []
     for item in manifest.items:
+        # Defensive: a manifest mutated or constructed past validation never shows one target twice.
+        if len(set(item.candidate_target_ids)) != len(item.candidate_target_ids):
+            raise ValueError("duplicate candidate target: an ambiguous atom's alternatives must be distinct")
         calc = _calculation_for(bundle, item.calculation_ref)
         bindings = atom_target_bindings(bundle, manifest, item)
 

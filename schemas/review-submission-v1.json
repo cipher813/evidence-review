@@ -128,7 +128,7 @@
     },
     "CalculationWorksheet": {
       "additionalProperties": false,
-      "description": "A reviewer-authored calculation, kept apart from candidate and prepared ones.\n\nIt never replaces a bundle formula. ``computation`` is derived on every\nvalidation with the package's bounded Decimal evaluator, so a client cannot\nsupply its own result; arithmetic never sets ``reviewer_support``.",
+      "description": "A reviewer-authored calculation, kept apart from candidate and prepared ones.\n\nIt never replaces a bundle formula. ``computation`` is derived on every\nvalidation with the package's bounded Decimal evaluator under its pinned\narithmetic context, so a client cannot supply its own result; arithmetic\nnever sets ``reviewer_support``. Replaying a sealed record (validation\ncontext ``SEALED``) proves the stored computation instead: it is kept byte for\nbyte when the replay agrees and refused, naming the worksheet, when not.",
       "properties": {
         "worksheet_id": {
           "pattern": "^[A-Za-z0-9_.:-]{1,120}$",

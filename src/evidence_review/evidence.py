@@ -2,9 +2,39 @@
 
 import ast
 import decimal
+import functools
 import re
 from decimal import Decimal, InvalidOperation
-from .contracts import NumericSpan
+from .contracts import NumericSpan, canonical_json
+
+# The evaluator's own arithmetic, applied through ``decimal.localcontext`` on every
+# call whatever the caller's thread context says (precision, rounding, exponent
+# limits, traps, exponent capitalisation). Its values equal CPython's default
+# context, so every result produced before the semantics were pinned under default
+# settings — sealed bundle recomputations and 0.6.0 worksheets — is reproduced
+# digit for digit. Changing any field is a new semantics id, never an edit to v1.
+ARITHMETIC_CONTEXT = decimal.Context(
+    prec=28, rounding=decimal.ROUND_HALF_EVEN, Emin=-999999, Emax=999999, capitals=1, clamp=0,
+    flags=[], traps=[decimal.InvalidOperation, decimal.DivisionByZero, decimal.Overflow])
+# Recorded on every new worksheet computation. "finite" adds the check that is
+# independent of any trap: a NaN, an infinity or a magnitude above Emax is a
+# calculation error, never a result.
+ARITHMETIC_SEMANTICS = ("decimal-v1:prec=28,rounding=ROUND_HALF_EVEN,Emin=-999999,Emax=999999,"
+                        "capitals=1,clamp=0,traps=InvalidOperation+DivisionByZero+Overflow,finite")
+
+
+def arithmetic():
+    """Enter the evaluator's pinned context (a copy; the caller's is restored on exit)."""
+    return decimal.localcontext(ARITHMETIC_CONTEXT)
+
+
+def deterministic(fn):
+    """Run ``fn`` under the pinned arithmetic context, never the ambient one."""
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        with arithmetic():
+            return fn(*args, **kwargs)
+    return wrapper
 
 MONTH = r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?"
 # Calendar dates are one occurrence, never split into separate numbers.
@@ -146,6 +176,7 @@ def validate_citation(citation, sources):
         raise ValueError("located excerpt mismatch")
 
 
+@deterministic
 def operand_evidence(operands, unit, conversions):
     """Report what evidence exists for each input; never certify support."""
     missing = []
@@ -259,6 +290,7 @@ def inventory(bundle):
     }
 
 
+@deterministic
 def evaluate(formula, values):
     """Bounded Decimal evaluation of +, -, *, / over named values; never ``eval``.
 
@@ -325,6 +357,7 @@ def formula_names(formula):
     return sorted({n.id for n in nodes if isinstance(n, ast.Name)})
 
 
+@deterministic
 def calculate(formula, values, reported, tolerance):
     try:
         result = evaluate(formula, values)
@@ -356,6 +389,7 @@ WORKSHEET_NOTE = ("Reviewer-authored arithmetic over reviewer-entered inputs. It
                   "establish that the subject is supported, and it never changes a supplied formula.")
 
 
+@deterministic
 def _number(text):
     try:
         value = Decimal(text.strip())
@@ -364,6 +398,7 @@ def _number(text):
     return value if value.is_finite() else None
 
 
+@deterministic
 def worksheet_computation(ws):
     """Derived outcome of one reviewer worksheet; inputs are never altered.
 
@@ -371,8 +406,9 @@ def worksheet_computation(ws):
     expression, undeclared name, non-numeric value). ``incomplete``: the formula
     reads an unavailable or blank input. ``calculation_error``: evaluation failed
     (division by zero is retained here, never coerced). ``computed``: a Decimal
-    result, compared with the reported value only when one was entered."""
-    base = {"evaluator": "evidence_review.evidence.evaluate", "result": None, "comparison": "not_compared",
+    result, compared with the reported value only when one was entered. Every
+    outcome names its ``arithmetic`` semantics (``ARITHMETIC_SEMANTICS``)."""
+    base = {"evaluator": "evidence_review.evidence.evaluate", "arithmetic": ARITHMETIC_SEMANTICS, "result": None, "comparison": "not_compared",
             "discrepancy": None, "reason": "", "unavailable": [], "evidence_verified": False,
             "note": WORKSHEET_NOTE}
     formula = ws.formula.strip()
@@ -405,6 +441,11 @@ def worksheet_computation(ws):
         else:
             reason = "arithmetic error: " + type(exc).__name__
         return {**base, "status": "calculation_error", "reason": reason}
+    # Independent of traps: no NaN, infinity or out-of-range magnitude is ever a result.
+    if not result.is_finite():
+        return {**base, "status": "calculation_error", "reason": "non-finite result"}
+    if result and result.adjusted() > ARITHMETIC_CONTEXT.Emax:
+        return {**base, "status": "calculation_error", "reason": "result outside the decimal range"}
     out = {**base, "status": "computed", "result": str(result)}
     reported, tolerance = _number(ws.reported_value), _number(ws.tolerance)
     if ws.reported_value.strip() == "":
@@ -414,6 +455,28 @@ def worksheet_computation(ws):
     compared = calculate(formula, {n: operands[n].value.strip() for n in names},
                          ws.reported_value.strip(), ws.tolerance.strip())
     return {**out, "comparison": compared["status"], "discrepancy": compared.get("discrepancy")}
+
+
+def sealed_computation(worksheet, stored):
+    """The stored computation of a sealed worksheet, proven by deterministic replay.
+
+    Replays ``worksheet``'s inputs and returns ``stored`` unchanged (the exact
+    object, so export bytes are the sealed bytes) only if the replay agrees with
+    it byte for byte. A record written before semantics were recorded (0.6.0,
+    no ``arithmetic`` key) is compared without that key. Any disagreement or an
+    unknown semantics id raises naming the worksheet; nothing is recomputed into
+    the record."""
+    label = "worksheet " + worksheet.worksheet_id
+    semantics = stored.get("arithmetic") if isinstance(stored, dict) else None
+    replay = worksheet_computation(worksheet)
+    if isinstance(stored, dict) and "arithmetic" not in stored:
+        replay.pop("arithmetic")
+    elif semantics != ARITHMETIC_SEMANTICS:
+        raise ValueError(f"{label}: unknown arithmetic semantics {semantics!r} in sealed computation; refusing to replay it")
+    if canonical_json(stored) != canonical_json(replay):
+        raise ValueError(f"{label}: sealed computation does not match its deterministic replay; "
+                         "refusing to export it rather than rewriting the sealed record")
+    return stored
 
 
 def navigation_coverage(bundle, links):

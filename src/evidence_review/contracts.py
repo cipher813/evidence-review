@@ -7,7 +7,7 @@ import re
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Literal
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator, model_serializer
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationInfo, model_validator, model_serializer
 
 
 PACKAGE_VERSION = "0.6.0"
@@ -32,6 +32,11 @@ def digest(value) -> str:
         ).encode("utf-8")
     )
     return hashlib.sha256(data).hexdigest()
+
+
+# Validation-context flag for replaying an already sealed record (export, hooks):
+# derived fields are proven against their stored values instead of overwritten.
+SEALED = "evidence_review.sealed"
 
 
 def now() -> str:
@@ -441,6 +446,8 @@ class ReviewBundle(Strict):
                 for d in [*n.diagnostics.candidate, *(d for a in n.diagnostics.attempts for d in a.diagnostics)]:
                     if d.citation:
                         validate_citation(d.citation, sources)
+        from .evidence import arithmetic
+
         for n in self.spans:
             original = {o.name: o for o in n.calculation.operands} if n.calculation else {}
             if len({o.name for o in n.prepared_inputs}) != len(n.prepared_inputs):
@@ -448,7 +455,8 @@ class ReviewBundle(Strict):
             for o in n.prepared_inputs:
                 candidate = original.get(o.name)
                 try:
-                    equal_value = candidate is not None and Decimal(o.value).is_finite() and Decimal(candidate.value).is_finite() and Decimal(o.value) == Decimal(candidate.value)
+                    with arithmetic():
+                        equal_value = candidate is not None and Decimal(o.value).is_finite() and Decimal(candidate.value).is_finite() and Decimal(o.value) == Decimal(candidate.value)
                 except InvalidOperation:
                     equal_value = False
                 if not equal_value or any(getattr(o, k) != getattr(candidate, k) for k in ("unit", "period")):
@@ -625,10 +633,13 @@ def finite_decimal(text, what):
     """True for a finite decimal, None for empty, False for unparseable text.
 
     Non-finite values (NaN, Infinity) are refused outright."""
+    from .evidence import arithmetic
+
     if text == "":
         return None
     try:
-        value = Decimal(text.strip())
+        with arithmetic():  # parse errors raise whatever traps the caller cleared
+            value = Decimal(text.strip())
     except InvalidOperation:
         return False
     if not value.is_finite():
@@ -640,8 +651,11 @@ class CalculationWorksheet(Strict):
     """A reviewer-authored calculation, kept apart from candidate and prepared ones.
 
     It never replaces a bundle formula. ``computation`` is derived on every
-    validation with the package's bounded Decimal evaluator, so a client cannot
-    supply its own result; arithmetic never sets ``reviewer_support``."""
+    validation with the package's bounded Decimal evaluator under its pinned
+    arithmetic context, so a client cannot supply its own result; arithmetic
+    never sets ``reviewer_support``. Replaying a sealed record (validation
+    context ``SEALED``) proves the stored computation instead: it is kept byte for
+    byte when the replay agrees and refused, naming the worksheet, when not."""
     worksheet_id: str = Field(pattern=r"^[A-Za-z0-9_.:-]{1,120}$")
     contract: Literal["reviewer-calculation-worksheet/v1"] = "reviewer-calculation-worksheet/v1"
     authorship: Literal["reviewer"] = "reviewer"
@@ -657,8 +671,8 @@ class CalculationWorksheet(Strict):
     computation: dict = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def recompute(self):
-        from .evidence import formula_names, worksheet_computation
+    def recompute(self, info: ValidationInfo):
+        from .evidence import formula_names, sealed_computation, worksheet_computation
 
         names = [o.name for o in self.operands]
         if len(set(names)) != len(names):
@@ -670,8 +684,16 @@ class CalculationWorksheet(Strict):
                 formula_names(self.formula)  # unsafe constructs raise and are never stored
             except SyntaxError:
                 pass  # an incomplete expression is retained as an input error
-        self.computation = worksheet_computation(self)
+        if (info.context or {}).get(SEALED):
+            self.computation = sealed_computation(self, self.computation)
+        else:
+            self.computation = worksheet_computation(self)
         return self
+
+
+def sealed_submission(data) -> "ReviewSubmission":
+    """Validate a stored submission without rewriting any sealed derived field."""
+    return ReviewSubmission.model_validate(data, context={SEALED: True})
 
 
 class ReviewSubmission(Strict):
