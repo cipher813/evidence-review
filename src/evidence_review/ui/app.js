@@ -43,6 +43,18 @@ function el(tag, text) {
   if (text !== undefined) n.textContent = text;
   return n;
 }
+// Source-of-truth map for answer annotation: every DOM text node that carries original answer
+// text is registered here with its field and the code-point offset it starts at. Anything else
+// inside an answer host (calculation cards, diagnostics, quantity checkboxes, preview buttons,
+// any future control) is presentation, never answer text, whatever it says.
+const ORIGINAL_TEXT = new WeakMap();
+function originalText(path, chars, start, end) {
+  const node = document.createTextNode(chars.slice(start, end).join(""));
+  ORIGINAL_TEXT.set(node, { path, start });
+  return node;
+}
+// Elements inserted inside an answer host that are not answer text carry this attribute.
+const NOT_ANSWER = "[data-not-answer]";
 // Text fragment (#:~:text=) so the original opens at the cited words where the
 // browser supports it; otherwise it opens at the top and the excerpt is shown here.
 function fragmentFor(excerpt) {
@@ -683,7 +695,7 @@ function showCalculation(span, anchor) {
   subject = claims.length === 1 ? claims[0] : null;
   selection = null;
   document.querySelectorAll(".calculation-card").forEach((n) => n.remove());
-  const card = el("aside"); card.className = "calculation-card";
+  const card = el("aside"); card.className = "calculation-card"; card.dataset.notAnswer = "";
   card.setAttribute("role", "region"); card.setAttribute("aria-label", "Calculation details");
   renderNumberCalculation(span, card);
   authorDeclarations(span.claim_ids, card);
@@ -699,7 +711,12 @@ function showCalculation(span, anchor) {
 function numberAction(s, verificationControls = true) {
   const direct = bundle.task_kind === "reference" ? null : directCitation(s);
   const prepared = bundle.task_kind === "reference" && Boolean(s.prepared_evidence?.length);
-  const b = el(direct ? "a" : "button", s.text);
+  const b = el(direct ? "a" : "button");
+  // The number's own text is original answer text at its exact offsets.
+  const field = bundle.fields.find((f) => f.path === s.field_path);
+  const chars = field ? Array.from(field.text) : [];
+  b.append(field && chars.slice(s.start, s.end).join("") === s.text
+    ? originalText(s.field_path, chars, s.start, s.end) : document.createTextNode(s.text));
   if (direct) { b.href = direct.href; b.target = "_blank"; b.rel = "noopener noreferrer"; }
   b.className = "number " + (["uncited", "ambiguous", "unavailable"].includes(s.state) ? "unresolved"
     : s.state === "identifier" ? "identifier" : direct ? "direct" : "");
@@ -748,9 +765,9 @@ function linkedStatement(text, subjectId, verificationControls = !atomicMode()) 
   let at = 0; const chars = Array.from(text);
   bundle.spans.filter((s) => s.field_path === field.path).sort((a,b) => a.start-b.start).forEach((s) => {
     // Atomic mode owns each atom's one check control in its row; statement context here is read-only.
-    wrap.append(document.createTextNode(chars.slice(at,s.start).join("")), numberAction(s, verificationControls)); at = s.end;
+    wrap.append(originalText(field.path, chars, at, s.start), numberAction(s, verificationControls)); at = s.end;
   });
-  wrap.append(document.createTextNode(chars.slice(at).join(""))); return wrap;
+  wrap.append(originalText(field.path, chars, at, chars.length)); return wrap;
 }
 function showSpan(span, follow = true) {
   if (bundle.task_kind === "reference") {
@@ -922,11 +939,11 @@ function renderReport() {
       .sort((a, b) => a.start - b.start);
     const chars = Array.from(f.text);
     spans.forEach((s) => {
-      p.append(document.createTextNode(chars.slice(offset, s.start).join("")));
-      p.append(bundle.task_kind === "reference" ? document.createTextNode(s.text) : numberAction(s));
+      p.append(originalText(f.path, chars, offset, s.start));
+      p.append(bundle.task_kind === "reference" ? originalText(f.path, chars, s.start, s.end) : numberAction(s));
       offset = s.end;
     });
-    p.append(document.createTextNode(chars.slice(offset).join("")));
+    p.append(originalText(f.path, chars, offset, chars.length));
     p.dataset.savedText = f.text;
     p.dataset.fieldPath = f.path;
     p.dataset.claimIds = JSON.stringify(f.claim_ids || []);
@@ -1578,31 +1595,24 @@ const MATERIAL_DISPOSITIONS = ["defective", "incomplete"];
 function codePoints(text) {
   return Array.from(text).length;
 }
-// Code-point offset of a DOM boundary within one answer host, counting only the
-// answer's own text (never control labels such as "Preview evidence").
-function answerOffset(host, node, offset) {
-  const point = document.createRange();
-  point.setStart(node, offset);
-  point.collapse(true);
-  const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT, {
-    acceptNode: (n) => n.parentElement.closest("[data-not-answer]") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
-  });
-  let count = 0;
-  for (let t = walker.nextNode(); t; t = walker.nextNode()) {
-    if (t === node) {
-      const before = t.data.slice(0, offset);
-      if (/[\uD800-\uDBFF]$/.test(before)) return null; // never split a surrogate pair
-      return count + codePoints(before);
-    }
-    if (point.comparePoint(t, 0) >= 0) return count;
-    count += codePoints(t.data);
-  }
-  return count;
-}
 function answerHost(node) {
   const element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
   return element?.closest("[data-field-path]") || null;
 }
+// Inside page UI inserted in this answer host (a calculation card, diagnostics, a control)?
+function insertedUi(host, node) {
+  const element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+  const ui = element?.closest(NOT_ANSWER);
+  return Boolean(ui && host.contains(ui));
+}
+const LONE_HIGH = /[\uD800-\uDBFF]$/, LONE_LOW = /^[\uDC00-\uDFFF]/;
+// Map a browser selection to original answer text only, or refuse it. Offsets come from the
+// registered original text nodes the range covers (code points), never from presentation DOM.
+// Crossing rule: inserted UI inside the selection is skipped, and the selection is accepted only
+// when the original text it covers is ONE contiguous run of the field — each covered original
+// piece starts exactly where the previous one ended. Any gap, reordering or unattributable text
+// is refused; nothing is guessed. The covered original text must then equal the frozen field
+// substring at the resolved offsets.
 function selectedAnswerRange() {
   const sel = document.getSelection();
   if (!bundle || !sel || sel.isCollapsed || !sel.rangeCount) return undefined;
@@ -1612,11 +1622,38 @@ function selectedAnswerRange() {
   if (!host || host !== end) return { error: "Select text within one answer field." };
   const field = annotatableFields().find((f) => f.path === host.dataset.fieldPath);
   if (!field) return { error: "That text is not part of an answer under review." };
-  const start = answerOffset(host, range.startContainer, range.startOffset);
-  const stop = answerOffset(host, range.endContainer, range.endOffset);
-  if (start === null || stop === null || !(start >= 0 && start < stop && stop <= codePoints(field.text)))
+  if (insertedUi(host, range.startContainer) || insertedUi(host, range.endContainer))
+    return { error: "That selection starts or ends inside calculation details or page controls, not the answer text. Nothing was selected." };
+  const pieces = [];
+  let crossed = false;
+  const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT);
+  for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+    if (!t.data.length || !range.intersectsNode(t)) continue;
+    const own = ORIGINAL_TEXT.get(t);
+    if (!own || own.path !== field.path || answerHost(t) !== host) {
+      if (insertedUi(host, t)) { crossed = true; continue; }
+      return { error: "That selection includes text that is not part of the original answer. Nothing was selected." };
+    }
+    const from = t === range.startContainer ? range.startOffset : 0;
+    const to = t === range.endContainer ? range.endOffset : t.data.length;
+    if (from >= to) continue; // touches this node only at a boundary
+    const text = t.data.slice(from, to);
+    if (LONE_HIGH.test(t.data.slice(0, from)) || LONE_HIGH.test(text) || LONE_LOW.test(text))
+      return { error: "That selection has no exact answer text." }; // never split a surrogate pair
+    const at = own.start + codePoints(t.data.slice(0, from));
+    pieces.push({ start: at, end: at + codePoints(text), text });
+  }
+  if (!pieces.length) return { error: "That selection has no exact answer text." };
+  if (pieces.some((p, k) => k && pieces[k - 1].end !== p.start))
+    return { error: "The answer text in that selection is not one contiguous passage of the answer, so it cannot be bound exactly. Nothing was selected." };
+  const start = pieces[0].start, stop = pieces[pieces.length - 1].end;
+  if (!(start >= 0 && start < stop && stop <= codePoints(field.text)))
     return { error: "That selection has no exact answer text." };
-  return rangeFor(field, start, stop);
+  const picked = rangeFor(field, start, stop);
+  // The browser's selected original text must be the frozen substring those offsets name.
+  if (pieces.map((p) => p.text).join("") !== picked.text)
+    return { error: "The selected text does not match the answer text at those characters. Nothing was selected." };
+  return { range: picked, crossed };
 }
 // Answer fields the server bound for annotation (never context fields).
 function annotatableFields() {
@@ -1653,33 +1690,47 @@ function typedOccurrences(field, needle) {
   }
   return out;
 }
+// Radio choices, not native selects: a closed <select>'s arrow keys are platform-dependent
+// (they open the popup on some platforms and change nothing in some headless runs), while a
+// radio group's Tab-in / arrow-between behaviour is defined by the browser on every platform.
+function radioChoice(name, value, label, checked) {
+  const wrap = el("label");
+  const input = el("input");
+  input.type = "radio"; input.name = name; input.value = value; input.checked = checked;
+  wrap.append(input, document.createTextNode(" " + label));
+  return wrap;
+}
+function checkedValue(group) {
+  return group.querySelector("input[type=radio]:checked")?.value || "";
+}
 function renderTypedOccurrences() {
-  const field = annotatableFields().find((f) => f.path === $("annotate-field").value);
+  const field = annotatableFields().find((f) => f.path === checkedValue($("annotate-field")));
   const needle = $("annotate-text").value;
   const pick = $("annotate-occurrence");
   const found = field ? typedOccurrences(field, needle) : [];
   pick.replaceChildren();
   if (!found.length)
-    pick.append(new Option(needle ? "No exact occurrence in this field" : "Type exact text first", ""));
+    pick.append(el("p", needle ? "No exact occurrence in this field" : "Type exact text first"));
   const chars = field ? Array.from(field.text) : [];
   found.forEach(([s, e], k) => {
     const before = chars.slice(Math.max(0, s - 20), s).join(""), after = chars.slice(e, e + 20).join("");
-    pick.append(new Option(`Occurrence ${k + 1} of ${found.length} (characters ${s + 1}–${e}): …${before}[${chars.slice(s, e).join("")}]${after}…`, `${s}:${e}`));
+    pick.append(radioChoice("annotate-occurrence", `${s}:${e}`,
+      `Occurrence ${k + 1} of ${found.length} (characters ${s + 1}–${e}): …${before}[${chars.slice(s, e).join("")}]${after}…`, k === 0));
   });
 }
 function renderTypedAnnotation() {
   const fields = annotatableFields();
   $("annotate-typed").hidden = !fields.length;
-  const pick = $("annotate-field"), keep = pick.value;
-  pick.replaceChildren(...fields.map((f) => new Option(f.label || f.path, f.path)));
-  if (fields.some((f) => f.path === keep)) pick.value = keep;
+  const pick = $("annotate-field"), keep = checkedValue(pick);
+  const chosen = fields.some((f) => f.path === keep) ? keep : fields[0]?.path;
+  pick.replaceChildren(...fields.map((f) => radioChoice("annotate-field", f.path, f.label || f.path, f.path === chosen)));
   renderTypedOccurrences();
 }
 $("annotate-field").onchange = renderTypedOccurrences;
 $("annotate-text").oninput = renderTypedOccurrences;
 $("use-typed-text").onclick = () => {
-  const field = annotatableFields().find((f) => f.path === $("annotate-field").value);
-  const chosen = $("annotate-occurrence").value;
+  const field = annotatableFields().find((f) => f.path === checkedValue($("annotate-field")));
+  const chosen = checkedValue($("annotate-occurrence"));
   const box = $("answer-selection");
   if (!field || !chosen) {
     answerSelection = null;
@@ -1695,12 +1746,14 @@ document.addEventListener("selectionchange", () => {
   if (picked === undefined) return;
   const box = $("answer-selection");
   if (picked.error) {
+    // A refused selection never leaves an earlier one armed for "Annotate selected answer text".
     answerSelection = null;
     box.textContent = picked.error;
     return;
   }
-  answerSelection = picked;
-  box.textContent = `Selected answer text (${describeRange(picked)}): “${short(picked.text, 120)}”`;
+  answerSelection = picked.range;
+  box.textContent = `Selected answer text (${describeRange(picked.range)}): “${short(picked.range.text, 120)}”` +
+    (picked.crossed ? " · calculation details and controls inside the selection are not part of it" : "");
 });
 // The chosen occurrence in its surroundings, so repeated words are distinguishable.
 function rangeInContext(r) {
@@ -1723,25 +1776,32 @@ function renderAnnotations() {
     div.className = "annotation";
     div.dataset.annotationId = a.annotation_id;
     div.append(el("h4", `Annotation ${i + 1} · ${describeRange(a.answer_range)}`), rangeInContext(a.answer_range));
-    const disposition = el("select");
+    const disposition = el("div");
+    disposition.className = "choice-group";
+    disposition.setAttribute("role", "radiogroup");
     disposition.setAttribute("aria-label", "Annotation disposition");
-    disposition.append(new Option("Choose disposition…", ""));
-    DISPOSITIONS.forEach(([value, label]) => disposition.append(new Option(label, value)));
-    disposition.value = a.disposition || "";
-    const material = el("select");
+    DISPOSITIONS.forEach(([value, label]) =>
+      disposition.append(radioChoice("disposition:" + a.annotation_id, value, label, a.disposition === value)));
+    const material = el("div");
+    material.className = "choice-group";
+    material.setAttribute("role", "radiogroup");
     material.setAttribute("aria-label", "Annotation materiality");
-    material.append(new Option("Choose materiality…", ""), new Option("Nonmaterial", "false"), new Option("Material", "true"));
-    material.value = a.material === null ? "" : String(a.material);
+    [["false", "Nonmaterial"], ["true", "Material"]].forEach(([value, label]) =>
+      material.append(radioChoice("material:" + a.annotation_id, value, label, a.material !== null && String(a.material) === value)));
     const applicable = () => { material.hidden = !MATERIAL_DISPOSITIONS.includes(a.disposition); };
     disposition.onchange = () => {
-      a.disposition = disposition.value || null;
+      a.disposition = checkedValue(disposition) || null;
       // Materiality is recorded only where a problem is reported.
-      if (!MATERIAL_DISPOSITIONS.includes(a.disposition)) { a.material = null; material.value = ""; }
+      if (!MATERIAL_DISPOSITIONS.includes(a.disposition)) {
+        a.material = null;
+        material.querySelectorAll("input").forEach((r) => { r.checked = false; });
+      }
       applicable();
       save();
     };
     material.onchange = () => {
-      a.material = material.value === "" ? null : material.value === "true";
+      const value = checkedValue(material);
+      a.material = value === "" ? null : value === "true";
       save();
     };
     applicable();
@@ -1820,7 +1880,7 @@ function annotateSelection() {
   renderAnnotations();
   renderWorksheets();
   save();
-  $("annotations").lastElementChild?.querySelector("select")?.focus();
+  $("annotations").lastElementChild?.querySelector("input[type=radio]")?.focus();
 }
 function render() {
   $("review-type").textContent = {
@@ -2106,15 +2166,15 @@ function renderAtomicStatements() {
     let at = 0;
     rows.filter((r) => r.field_path === f.path).sort((a, b) => a.start - b.start).forEach((r) => {
       if (r.start < at) return; // Overlap is refused upstream; never redraw text twice.
-      p.append(document.createTextNode(chars.slice(at, r.start).join("")));
-      const mark = el("button", chars.slice(r.start, r.end).join(""));
+      p.append(originalText(f.path, chars, at, r.start));
+      const mark = el("button"); mark.append(originalText(f.path, chars, r.start, r.end));
       mark.type = "button"; mark.className = "atom-mark " + r.evidence_state; mark.dataset.atomMark = r.atom_id;
       mark.setAttribute("aria-label", `${r.text}: go to its check row (${ATOM_STATE[r.evidence_state]})`);
       mark.onclick = () => document.querySelector(`[data-atom-row="${CSS.escape(r.atom_id)}"] .atom-focus`)?.focus();
       p.append(mark);
       at = r.end;
     });
-    p.append(document.createTextNode(chars.slice(at).join("")));
+    p.append(originalText(f.path, chars, at, chars.length));
     report.append(p);
   });
   const context = evidence.atoms.atomization.context_span_ids.length;

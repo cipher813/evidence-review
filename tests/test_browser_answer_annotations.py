@@ -65,7 +65,23 @@ def drag_select(page, path, start, end):
     page.mouse.up()
 
 
-def annotate(page, path, start, end, disposition, reason=""):
+# The visible label of each disposition radio (app.js DISPOSITIONS).
+DISPOSITION_LABEL = {"supported": "Supported by the sources", "defective": "Defective",
+                     "cannot_verify": "Cannot verify", "incomplete": "Incomplete"}
+
+
+def disposition(card, value):
+    """The radio for one disposition in an annotation card's disposition group."""
+    return card.get_by_role("radiogroup", name="Annotation disposition").get_by_role(
+        "radio", name=DISPOSITION_LABEL[value], exact=True)
+
+
+def materiality(card, material):
+    return card.get_by_role("radiogroup", name="Annotation materiality").get_by_role(
+        "radio", name="Material" if material else "Nonmaterial", exact=True)
+
+
+def annotate(page, path, start, end, disposition_value, reason=""):
     drag_select(page, path, start, end)
     expect(page.get_by_label("Selected answer text", exact=True)).to_contain_text(
         f"characters {start + 1}–{end}")
@@ -73,7 +89,7 @@ def annotate(page, path, start, end, disposition, reason=""):
     page.get_by_role("button", name="Annotate selected answer text").click()
     card = page.locator("#annotations .annotation").last
     expect(page.locator("#status")).not_to_have_text(revision)
-    card.get_by_label("Annotation disposition").select_option(disposition)
+    disposition(card, disposition_value).check()
     if reason:
         card.get_by_label("Annotation reason").fill(reason)
     return card
@@ -102,12 +118,12 @@ def test_mouse_selection_binds_exact_code_points_and_the_chosen_occurrence(tmp_p
         card = annotate(page, "qualifications", SECOND, SECOND + len(PHRASE), "cannot_verify", "No frozen source covers demand.")
         expect(card.get_by_label("Annotated answer text: Qualifications, characters "
                                  f"{SECOND + 1}–{SECOND + len(PHRASE)}")).to_contain_text(PHRASE)
-        expect(card.get_by_label("Annotation materiality")).to_be_hidden()
+        expect(card.get_by_role("radiogroup", name="Annotation materiality")).to_be_hidden()
         annotate(page, "qualifications", FIRST, FIRST + len(PHRASE), "supported")
         # A passage starting at the combining mark's base letter and crossing the number button.
         accent = QUALIFICATION.index("cafe")
         annotate(page, "qualifications", 0, accent + 5, "incomplete", "Omits which region.")
-        page.locator("#annotations .annotation").last.get_by_label("Annotation materiality").select_option("false")
+        materiality(page.locator("#annotations .annotation").last, False).check()
         settle(page)
         records = saved(store, b)
         ranges = [(r["answer_range"]["start"], r["answer_range"]["end"], r["answer_range"]["text"]) for r in records]
@@ -170,7 +186,7 @@ def test_draft_restart_submit_amend_export_and_defect_ranges(tmp_path):
         page = browser.new_page(viewport={"width": 1600, "height": 1000})
         page.goto(h.url)
         card = page.locator("#annotations .annotation").first
-        expect(card.get_by_label("Annotation disposition")).to_have_value("cannot_verify")
+        expect(disposition(card, "cannot_verify")).to_be_checked()
         expect(card.get_by_label("Annotation reason")).to_have_value("Unverifiable demand.")
         expect(page.locator(".defect").first.get_by_label(
             f"Annotated answer text: Qualifications, characters {FIRST + 1}–{FIRST + len(PHRASE)}")).to_be_visible()
@@ -213,6 +229,5 @@ def test_stale_tab_reports_differing_annotations_without_overwrite(tmp_path):
         assert [a["answer_range"]["start"] for a in saved(store, b)] == [FIRST]
         second.get_by_role("button", name="Use saved version").click()
         expect(second.locator("#annotations .annotation")).to_have_count(1)
-        expect(second.locator("#annotations .annotation").first.get_by_label("Annotation disposition")).to_have_value(
-            "supported")
+        expect(disposition(second.locator("#annotations .annotation").first, "supported")).to_be_checked()
         browser.close()

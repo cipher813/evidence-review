@@ -4,7 +4,7 @@ import json
 from playwright.sync_api import expect, sync_playwright
 
 from evidence_review import FileStore, export_json, open_review
-from test_browser_answer_annotations import drag_select, settle
+from test_browser_answer_annotations import disposition, drag_select, settle
 from test_browser_worksheet import operand, select_line
 from test_reviewer_worksheet import worksheet_bundle
 
@@ -30,7 +30,7 @@ def test_worksheet_from_selected_prose_annotation_survives_restart_and_export(tm
             f"characters {start + 1}–{start + len(PROSE)}")
         page.get_by_role("button", name="Annotate selected answer text").click()
         card = page.locator("#annotations .annotation").first
-        card.get_by_label("Annotation disposition").select_option("cannot_verify")
+        disposition(card, "cannot_verify").check()
         card.get_by_label("Annotation reason").fill("The decline needs recomputing from the table.")
         page.get_by_role("button", name="Start calculation worksheet from annotation 1", exact=True).click()
         sheet = page.get_by_role("group", name="Worksheet 1")

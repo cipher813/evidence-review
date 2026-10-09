@@ -341,3 +341,8 @@ mark.cited-words { background: #fff0bc; text-decoration: underline; text-decorat
 /* The author's own declaration: set apart and labelled in text, never styled like evidence or support. */
 .author-declaration { border-left: 3px dashed #6b6b6b; padding-left: .5rem; margin: .4rem 0; font-style: italic; }
 .author-declaration small { display: block; font-style: normal; }
+/* Radio choices: their keyboard behaviour (Tab into the group, arrows within it) is the browser's
+   own and the same on every platform, unlike a closed native select's arrow keys. */
+.choice-group { display: flex; flex-direction: column; gap: .15rem; margin: .3rem 0; }
+.choice-group > label { display: block; }
+.choice-group[hidden] { display: none; }

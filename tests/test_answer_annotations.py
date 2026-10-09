@@ -93,6 +93,33 @@ def test_invalid_stale_and_out_of_bounds_ranges_fail(change, message):
         validate_answer_range(b, {**good, **change})
 
 
+REFUSED = "text mismatch|unable to parse raw data as a unicode string"
+
+
+@pytest.mark.parametrize("text", ["(24.6 ", " to 2", " to 24.", "\ud835", " TO 24"])
+def test_submitted_text_must_be_the_frozen_substring_at_its_offsets(text, tmp_path):
+    """I12179: the browser selected "(24.6 " inside an inserted calculation card but bound
+    offsets 29-35 (" to 24"). The store refuses any range whose text is not exactly the frozen
+    field substring at its code-point offsets, through the save path as well as directly."""
+    b = bundle()
+    good = answer_range(b, "summary", 29, 35)
+    assert good.text == " to 24"
+    bad = {**good.model_dump(), "text": text}
+    # A lone surrogate (half of a split astral character) is refused before the comparison.
+    with pytest.raises(ValueError, match=REFUSED):
+        validate_answer_range(b, bad)
+    draft = {"judgments": {}, "defects": [], "annotations": [
+        {"annotation_id": "ann:card", "answer_range": bad, "disposition": None, "reason": "", "material": None,
+         "selections": []}]}
+    with pytest.raises(ValueError, match=REFUSED):
+        validate_answers(b, draft, complete=False)
+    store = FileStore(tmp_path)
+    store.register(b)
+    with pytest.raises(ValueError, match=REFUSED):
+        store.save_snapshot(b, 0, "draft", draft, "Reviewer")
+    assert "annotations" not in store.load_task(b.bundle_id)["answers"]
+
+
 @pytest.mark.parametrize("change", [{"start": True}, {"start": 1.0}, {"start": "1"}, {"start": -1},
                                     {"offset_unit": "utf16"}, {"contract": "answer-annotation/v0"},
                                     {"text": ""}, {"field_sha256": "x"}, {"extra": 1}])

@@ -60,10 +60,10 @@
         <div id="annotations" aria-label="Answer annotations"></div>
         <fieldset id="annotate-typed">
           <legend>Choose answer text without a mouse</legend>
-          <p id="annotate-typed-help">Pick an answer field, type the exact text (characters must match exactly; nothing is normalised) and choose which occurrence. This selects the same range a mouse selection does; then annotate it.</p>
-          <label>Answer field <select id="annotate-field" aria-label="Answer field to annotate" aria-describedby="annotate-typed-help"></select></label>
+          <p id="annotate-typed-help">Pick an answer field, type the exact text (characters must match exactly; nothing is normalised) and choose which occurrence. This selects the same range a mouse selection does; then annotate it. Tab moves between the field choices, the text and the occurrence choices; arrow keys move within a set of choices.</p>
+          <div id="annotate-field" class="choice-group" role="radiogroup" aria-label="Answer field to annotate" aria-describedby="annotate-typed-help"></div>
           <label>Exact text <input id="annotate-text" aria-label="Exact answer text to annotate" aria-describedby="annotate-typed-help" /></label>
-          <label>Occurrence <select id="annotate-occurrence" aria-label="Occurrence of the typed text"></select></label>
+          <div id="annotate-occurrence" class="choice-group" role="radiogroup" aria-label="Occurrence of the typed text"></div>
           <button id="use-typed-text" type="button">Select this occurrence</button>
         </fieldset>
         <button id="add-annotation" type="button">Annotate selected answer text</button>
